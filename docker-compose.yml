@@ -1,11 +1,28 @@
 services:
   proxy:
-    build: .
-    env_file: .env
-    ports:
-      - "8000:8000"
+    build: ./proxy
+    env_file: ./proxy/.env
     volumes:
       - proxy-data:/data
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      PROXY_URL: http://proxy:8000
+    depends_on:
+      proxy:
+        condition: service_healthy
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
     restart: unless-stopped
 
 volumes:
