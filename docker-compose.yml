@@ -1,0 +1,12 @@
+services:
+  proxy:
+    build: .
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - proxy-data:/data
+    restart: unless-stopped
+
+volumes:
+  proxy-data:
