@@ -1,0 +1,11 @@
+{
+  "headers": [
+    {
+      "source": "/email.csv",
+      "headers": [
+        { "key": "Content-Type", "value": "text/csv; charset=utf-8" },
+        { "key": "Cache-Control", "value": "no-cache" }
+      ]
+    }
+  ]
+}

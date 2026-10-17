@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scam-Email Gateway</title>
+<meta name="description" content="Incoming email is held in quarantine until it is verified. Suspicious links are detonated in a disposable sandbox with a decoy identity.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b0f19;
+    --panel: #121829;
+    --border: #232c45;
+    --text: #e6e9f2;
+    --muted: #8b95b0;
+    --accent: #5b8cff;
+    --accent-2: #9b6bff;
+    --ok: #3ddc97;
+    --bad: #ff5d73;
+    --warn: #ffc857;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: Inter, system-ui, sans-serif; line-height: 1.6;
+    background-image:
+      radial-gradient(900px 500px at 15% -10%, rgba(91,140,255,.18), transparent 60%),
+      radial-gradient(700px 500px at 90% 0%, rgba(155,107,255,.14), transparent 60%);
+    background-repeat: no-repeat;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 1.25rem; }
+  nav { display: flex; justify-content: space-between; align-items: center; padding: 1.25rem 0; }
+  nav .logo { font-weight: 800; letter-spacing: -.02em; }
+  nav .logo span { color: var(--accent); }
+  nav a { color: var(--muted); text-decoration: none; margin-left: 1.25rem; font-size: .9rem; }
+  nav a:hover { color: var(--text); }
+
+  .hero { padding: 4.5rem 0 3.5rem; text-align: center; }
+  .badge {
+    display: inline-block; font: 600 .75rem "JetBrains Mono", monospace; color: var(--accent);
+    border: 1px solid var(--border); background: var(--panel); padding: .3rem .8rem; border-radius: 999px;
+  }
+  h1 {
+    font-size: clamp(2.2rem, 6vw, 4rem); line-height: 1.08; letter-spacing: -.035em; font-weight: 800;
+    margin: 1.2rem 0;
+  }
+  h1 em {
+    font-style: normal;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .lead { max-width: 640px; margin: 0 auto 2rem; color: var(--muted); font-size: 1.15rem; }
+  .btn {
+    display: inline-block; padding: .8rem 1.5rem; border-radius: 10px; font-weight: 600; text-decoration: none;
+    color: #fff; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border: 0; cursor: pointer;
+    font-size: 1rem; font-family: inherit; transition: transform .15s, box-shadow .15s;
+    box-shadow: 0 8px 28px rgba(91,140,255,.3);
+  }
+  .btn:hover { transform: translateY(-2px); box-shadow: 0 12px 34px rgba(91,140,255,.45); }
+  .btn.ghost { background: transparent; border: 1px solid var(--border); box-shadow: none; color: var(--text); margin-left: .5rem; }
+
+  section { padding: 3rem 0; }
+  h2 { font-size: 1.8rem; letter-spacing: -.02em; margin: 0 0 .5rem; }
+  .sub { color: var(--muted); margin: 0 0 2rem; }
+
+  .flow { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; justify-content: center; font: 600 .85rem "JetBrains Mono", monospace; }
+  .flow .node { padding: .6rem 1rem; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+  .flow .arrow { color: var(--muted); }
+  .flow .node.accent { border-color: var(--accent); color: var(--accent); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 1.4rem; }
+  .card .num { font: 600 .8rem "JetBrains Mono", monospace; color: var(--accent); }
+  .card h3 { margin: .4rem 0; font-size: 1.1rem; }
+  .card p { margin: 0; color: var(--muted); font-size: .95rem; }
+
+  .verdicts .card { border-top: 3px solid var(--border); }
+  .verdicts .released { border-top-color: var(--ok); }
+  .verdicts .blocked { border-top-color: var(--bad); }
+  .verdicts .held { border-top-color: var(--warn); }
+  .tag { font: 600 .75rem "JetBrains Mono", monospace; text-transform: uppercase; }
+  .released .tag { color: var(--ok); } .blocked .tag { color: var(--bad); } .held .tag { color: var(--warn); }
+
+  .stack { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: center; }
+  .stack span { font: 500 .85rem "JetBrains Mono", monospace; padding: .4rem .9rem; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); }
+
+  .composer { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 1.6rem; }
+  .composer dl { margin: 0 0 1.4rem; display: grid; grid-template-columns: 6rem 1fr; gap: .6rem 1rem; }
+  .composer dt { color: var(--muted); font-size: .85rem; text-transform: uppercase; letter-spacing: .06em; padding-top: .15rem; }
+  .composer dd { margin: 0; }
+  .composer pre {
+    margin: 0; white-space: pre-wrap; font: 400 .9rem "JetBrains Mono", monospace;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 1rem;
+  }
+
+  footer { padding: 2.5rem 0 3rem; text-align: center; color: var(--muted); font-size: .85rem; border-top: 1px solid var(--border); margin-top: 2rem; }
+  @media (max-width: 560px) { .composer dl { grid-template-columns: 1fr; } .btn.ghost { margin: .6rem 0 0; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <div class="logo">scam<span>.</span>gateway</div>
+    <div><a href="#how">How it works</a><a href="#verdicts">Verdicts</a><a href="#safety">Safety</a><a href="#try">Try it</a></div>
+  </nav>
+
+  <header class="hero">
+    <span class="badge">HarvardHack 2026</span>
+    <h1>Scam emails never reach<br>your <em>inbox</em>.</h1>
+    <p class="lead">Incoming mail is held in quarantine until it is verified. Suspicious links are opened in a disposable sandbox and fed a decoy identity, so we catch the scam before you ever see it.</p>
+    <a class="btn" href="#try">Try the demo</a>
+    <a class="btn ghost" href="#how">How it works</a>
+  </header>
+
+  <section id="how">
+    <h2>How it works</h2>
+    <p class="sub">Every message takes the same path. Only mail that passes reaches you.</p>
+    <div class="flow">
+      <div class="node">Gmail</div><div class="arrow">→</div>
+      <div class="node">Quarantine</div><div class="arrow">→</div>
+      <div class="node">Triage</div><div class="arrow">→</div>
+      <div class="node accent">Daytona sandbox + decoy persona</div><div class="arrow">→</div>
+      <div class="node">Verdict</div>
+    </div>
+    <div class="grid" style="margin-top:2rem">
+      <div class="card"><div class="num">01</div><h3>Quarantine</h3><p>A Gmail filter diverts all incoming mail out of the inbox into a quarantine label. Only the gateway moves mail back.</p></div>
+      <div class="card"><div class="num">02</div><h3>Triage</h3><p>Mail with no links and no red flags goes straight through. Anything with links goes on to be tested.</p></div>
+      <div class="card"><div class="num">03</div><h3>Detonation</h3><p>Links open in a throwaway Daytona sandbox. Forms are filled with a decoy identity backed by a fake customer in the Nessie bank API.</p></div>
+      <div class="card"><div class="num">04</div><h3>Verdict</h3><p>If the page harvests card, bank or login details, the mail is blocked and we record where the scammer sends the data.</p></div>
+    </div>
+  </section>
+
+  <section id="verdicts" class="verdicts">
+    <h2>Three possible verdicts</h2>
+    <p class="sub">Each message ends up in exactly one place.</p>
+    <div class="grid">
+      <div class="card released"><div class="tag">Released</div><h3>Safe</h3><p>No links and no red flags, or the sandbox found the links harmless. Delivered to your inbox.</p></div>
+      <div class="card blocked"><div class="tag">Blocked</div><h3>Scam</h3><p>The page asked for card, CVV, SSN or bank details, or posted data to an exfiltration endpoint. Moved away and never shown.</p></div>
+      <div class="card held"><div class="tag">Held</div><h3>Unverified</h3><p>The page was down or the sandbox failed. It stays out of your inbox until you review it.</p></div>
+    </div>
+  </section>
+
+  <section id="safety">
+    <h2>Safety model</h2>
+    <p class="sub">The sandbox only ever sees fake data.</p>
+    <div class="grid">
+      <div class="card"><h3>Disposable</h3><p>Each link opens in an ephemeral sandbox that is auto-deleted and never reused. Downloads are cancelled, dialogs dismissed and popups closed.</p></div>
+      <div class="card"><h3>Decoy data only</h3><p>Luhn-valid card numbers from a reserved test range and 9xx SSNs. None of your data ever touches a scam page.</p></div>
+      <div class="card"><h3>Locked down</h3><p>Containers run non-root and read-only with all capabilities dropped. Secrets stay in server-side env files.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="stack"><span>Gmail API</span><span>Daytona</span><span>Nessie API</span><span>FastAPI</span><span>Docker Compose</span></div>
+  </section>
+
+  <section id="try">
+    <h2>Try it</h2>
+    <p class="sub">This opens your email app with a sample scam-style message already written. Send it to a gateway-protected address to see it get caught.</p>
+    <div class="composer">
+      <dl>
+        <dt>To</dt><dd id="to">Loading…</dd>
+        <dt>Subject</dt><dd id="subject"></dd>
+        <dt>Body</dt><dd><pre id="body"></pre></dd>
+      </dl>
+      <a class="btn" id="compose" href="#try">Open in email app</a>
+    </div>
+  </section>
+
+  <footer>Built at HarvardHack 2026 · Gmail · Daytona · Nessie</footer>
+</div>
+
+<script>
+  // Minimal CSV parser: handles quoted fields, commas and newlines inside quotes, "" escapes.
+  function parseCsv(text) {
+    const rows = [];
+    let row = [], field = "", quoted = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (quoted) {
+        if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+        else if (c === '"') quoted = false;
+        else field += c;
+      } else if (c === '"') quoted = true;
+      else if (c === ",") { row.push(field); field = ""; }
+      else if (c === "\n" || c === "\r") {
+        if (c === "\r" && text[i + 1] === "\n") i++;
+        row.push(field); field = "";
+        rows.push(row); row = [];
+      } else field += c;
+    }
+    if (field || row.length) { row.push(field); rows.push(row); }
+    return rows;
+  }
+
+  async function load() {
+    // Edit email.csv to change the email. The first data row is used.
+    const res = await fetch("email.csv");
+    const [header, first] = parseCsv(await res.text());
+    const EMAIL = Object.fromEntries(header.map((h, i) => [h.trim(), first[i] || ""]));
+
+    const params = new URLSearchParams();
+    if (EMAIL.cc) params.set("cc", EMAIL.cc);
+    params.set("subject", EMAIL.subject);
+    params.set("body", EMAIL.body);
+    // URLSearchParams encodes spaces as "+", which mail clients show literally.
+    const query = params.toString().replace(/\+/g, "%20");
+
+    document.getElementById("compose").href = `mailto:${encodeURIComponent(EMAIL.to)}?${query}`;
+    document.getElementById("to").textContent = EMAIL.to;
+    document.getElementById("subject").textContent = EMAIL.subject;
+    document.getElementById("body").textContent = EMAIL.body;
+  }
+
+  load().catch(() => {
+    document.getElementById("to").textContent = "";
+    document.getElementById("body").textContent =
+      "Could not load email.csv. Serve this folder over http (python3 -m http.server) instead of opening the file directly.";
+  });
+</script>
+</body>
+</html>
