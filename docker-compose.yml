@@ -20,7 +20,10 @@ services:
   frontend:
     build: ./frontend
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+      proxy:
+        condition: service_healthy
     ports:
       - "3000:80"
     restart: unless-stopped
