@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import secrets
 
 from . import db, indicators
 from .identity import generate_identity
@@ -30,7 +31,6 @@ async def run(s, engagement_id: str) -> dict:
 async def _ensure_mule(s, proxy: ProxyClient) -> str:
     """A separate Nessie account that stands in for the scammer's cash-out (mule) account."""
     ident = await generate_identity(s)
-    import secrets
     res = await proxy.signup({
         "username": f"cashout_{secrets.token_hex(3)}", "password": secrets.token_urlsafe(12),
         "first_name": ident["first_name"], "last_name": ident["last_name"], "address": ident["address"],

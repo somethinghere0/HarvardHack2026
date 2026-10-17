@@ -46,7 +46,6 @@ async function request(method, path, body) {
 // Nessie v1 wraps created objects in {objectCreated}; v2 returns the object. Lists may be bare or wrapped.
 const unwrap = (d) => d?.objectCreated ?? d;
 const asList = (d) => (Array.isArray(d) ? d : d?.data ?? d?.items ?? d?.results ?? []);
-const today = () => new Date().toISOString().slice(0, 10);
 
 // Nessie v2 stores money as integer cents (balance_cents / amount_cents); the mock uses dollars.
 // Accept either so one normalizer serves both backends.

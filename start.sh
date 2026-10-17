@@ -32,11 +32,12 @@ echo "  installing core dependencies…"
 "$PIP" install -q fastapi "uvicorn[standard]" httpx argon2-cffi faker
 
 # 4. extra deps only for whichever integrations you turned on in .env
-want() { grep -qiE "^$1=(0|false|no|off)\s*$" .env; }         # FAKE flag set to off
-haskey() { grep -qiE "^$1=.+$" .env && ! grep -qiE "^$1=\s*$" .env; }  # key has a value
-if want GMAIL_FAKE; then echo "  + Gmail libs…"; "$PIP" install -q google-api-python-client google-auth google-auth-oauthlib; fi
-if want DAYTONA_FAKE; then echo "  + Daytona SDK…"; "$PIP" install -q daytona; fi
-if haskey ANTHROPIC_API_KEY; then echo "  + Anthropic SDK…"; "$PIP" install -q anthropic; fi
+want() { grep -qiE "^$1=(0|false|no|off)[[:space:]]*$" .env; }                        # FAKE flag off
+haskey() { grep -qE "^$1=[^[:space:]]" .env; }                                        # key has a value
+# (non-fatal: a failed optional install shouldn't stop the stack from starting)
+if want GMAIL_FAKE; then echo "  + Gmail libs…"; "$PIP" install -q google-api-python-client google-auth google-auth-oauthlib || echo "    (Gmail libs failed; keep GMAIL_FAKE=1 or install manually)"; fi
+if want DAYTONA_FAKE; then echo "  + Daytona SDK…"; "$PIP" install -q daytona || echo "    (Daytona SDK failed; keep DAYTONA_FAKE=1 or install manually)"; fi
+if haskey ANTHROPIC_API_KEY; then echo "  + Anthropic SDK…"; "$PIP" install -q anthropic || echo "    (Anthropic SDK failed; classification falls back to heuristics)"; fi
 
 echo "→ starting (Ctrl+C to stop)"
 exec "$VENV/bin/python" dev.py

@@ -90,7 +90,19 @@ def _seq(ev: dict) -> int:
     return v if isinstance(v, int) else 0
 
 
+# Dedupe ingested events by their Nessie id, so webhook retries or a non-incrementing /events cursor
+# can't double-count a transfer (which would spam the timeline and inflate indicators).
+_seen_events: set = set()
+
+
 def _ingest_nessie_event(env: dict) -> None:
+    ev_id = env.get("id") or env.get("seq")
+    if ev_id is not None:
+        if ev_id in _seen_events:
+            return
+        _seen_events.add(ev_id)
+        if len(_seen_events) > 10000:  # bound memory for long-running sessions
+            _seen_events.clear()
     data = env.get("data", env)
     account_id = env.get("account_id") or data.get("payer_id") or data.get("payee_id")
     eid = None

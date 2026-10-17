@@ -18,6 +18,7 @@ class NessieClient:
         self._http = httpx.AsyncClient(
             base_url=base_url, headers={"Authorization": f"Bearer {api_key}"}, timeout=30, transport=transport
         )
+        self._owner_cache: dict[str, str] = {}  # account id -> owning customer id, per instance
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -37,8 +38,6 @@ class NessieClient:
             await self._http.delete(f"/customers/{customer_id}")
         except httpx.HTTPError:
             pass  # best effort
-
-    _owner_cache: dict[str, str] = {}
 
     async def account_owner(self, account_id: str) -> str | None:
         """Customer id that owns an account, cached. Used to keep a session scoped to its own data."""
