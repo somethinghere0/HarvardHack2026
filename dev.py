@@ -27,20 +27,23 @@ def _is_public(url: str) -> bool:
 
 
 def load_dotenv() -> None:
-    f = ROOT / ".env"
-    if not f.exists():
-        return
-    for line in f.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
+    # .env.local overrides .env (loaded first; setdefault keeps the first non-shadowed value).
+    for name in (".env.local", ".env"):
+        f = ROOT / name
+        if not f.exists():
             continue
-        k, _, v = line.partition("=")
-        v = v.strip()
-        if v and v[0] in "\"'" and v[-1:] == v[0]:
-            v = v[1:-1]
-        elif " #" in v:
-            v = v.split(" #", 1)[0].rstrip()
-        os.environ.setdefault(k.strip(), v)
+        for line in f.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            v = v.strip()
+            if v and v[0] in "\"'" and v[-1:] == v[0]:
+                v = v[1:-1]
+            elif " #" in v:
+                v = v.split(" #", 1)[0].rstrip()
+            if v:  # don't let an empty override mask a real value in the other file
+                os.environ.setdefault(k.strip(), v)
 
 
 def env(**over) -> dict:
