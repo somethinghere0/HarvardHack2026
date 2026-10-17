@@ -16,12 +16,9 @@ class Settings:
     # Shared secret for proxy<->orchestrator and agent<->orchestrator internal calls.
     internal_secret: str = os.environ.get("INTERNAL_SECRET", "dev-internal-secret")
 
-    # Public base URL (Cloudflare tunnel). Used for the Nessie webhook callback and so the sandboxed
-    # agent can reach the portal and the orchestrator. Blank => poll GET /events instead of webhooks.
+    # Public base URL (Cloudflare tunnel). It is Honeybank's own address — the phishing destination
+    # the agent signs into — plus the Nessie webhook callback. Blank => poll GET /events for webhooks.
     public_url: str = os.environ.get("PUBLIC_URL", "").rstrip("/")
-
-    # Public URL of the decoy phishing portal the agent logs into (defaults to <public_url>/portal).
-    portal_url: str = os.environ.get("PORTAL_URL", "").rstrip("/")
 
     # Nessie v2 (shared with the proxy).
     nessie_base_url: str = os.environ.get("NESSIE_BASE_URL", "https://v2-prod-api.nessieisreal.com").rstrip("/")

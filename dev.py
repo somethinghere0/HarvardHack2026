@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Run the whole Honeybank stack locally (no Docker): auth proxy, orchestrator, decoy portal, and a
-gateway that serves the frontend and reverse-proxies /bank-api, /api and /portal. Everything is live
+"""Run the whole Honeybank stack locally (no Docker): auth proxy, orchestrator, email-firewall watcher, and a
+gateway that serves the frontend and reverse-proxies /bank-api and /api. Everything is live
 — it needs the real keys in .env (at minimum NESSIE_API_KEY; ANTHROPIC_API_KEY + DAYTONA_API_KEY +
 a public PUBLIC_URL to run the sandboxed agent).
 
@@ -19,7 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 PY = sys.executable
-PORTS = {"proxy": 8000, "orch": 8001, "portal": 8080, "gateway": 3000}
+PORTS = {"proxy": 8000, "orch": 8001, "gateway": 3000}
 
 
 def _is_public(url: str) -> bool:
@@ -80,7 +80,6 @@ def main() -> None:
     datadir.mkdir(exist_ok=True)
     internal = os.environ.get("INTERNAL_SECRET", "dev-internal-secret")
     public_url = os.environ.get("PUBLIC_URL", "").strip()
-    portal_public = os.environ.get("PORTAL_URL", "").strip() or (f"{public_url}/portal" if public_url else "")
     procs: list[subprocess.Popen] = []
 
     def spawn(name, args, cwd, environ):
@@ -97,19 +96,13 @@ def main() -> None:
         spawn("orch", [PY, "-m", "uvicorn", "app.main:app", "--port", str(PORTS["orch"])],
               ROOT / "backend", env(ORCH_DB_PATH=str(datadir / "orchestrator.db"),
                                     PROXY_URL=f"http://127.0.0.1:{PORTS['proxy']}", INTERNAL_SECRET=internal,
-                                    PUBLIC_URL=public_url, PORTAL_URL=portal_public))
+                                    PUBLIC_URL=public_url))
         wait_health(f"http://127.0.0.1:{PORTS['orch']}/health", "orchestrator")
-
-        spawn("portal", [PY, "-m", "uvicorn", "app:app", "--port", str(PORTS["portal"])],
-              ROOT / "portal", env(PROXY_URL=f"http://127.0.0.1:{PORTS['proxy']}",
-                                   ORCHESTRATOR_URL=f"http://127.0.0.1:{PORTS['orch']}", INTERNAL_SECRET=internal))
-        wait_health(f"http://127.0.0.1:{PORTS['portal']}/health", "portal")
 
         spawn("gateway", [PY, "-m", "uvicorn", "dev_gateway:app", "--port", str(PORTS["gateway"])],
               ROOT, env(FRONTEND_DIR=str(ROOT / "frontend"),
                         DEV_PROXY_URL=f"http://127.0.0.1:{PORTS['proxy']}",
-                        DEV_ORCH_URL=f"http://127.0.0.1:{PORTS['orch']}",
-                        DEV_PORTAL_URL=f"http://127.0.0.1:{PORTS['portal']}"))
+                        DEV_ORCH_URL=f"http://127.0.0.1:{PORTS['orch']}"))
         wait_health(f"http://127.0.0.1:{PORTS['gateway']}/", "gateway")
 
         # Email firewall: vet every inbound Gmail message (needs an app password).
@@ -133,7 +126,6 @@ def main() -> None:
         print("\n  Honeybank is up (LIVE):")
         print(f"    Bank (bait):    http://localhost:{PORTS['gateway']}/")
         print(f"    Fraud monitor:  http://localhost:{PORTS['gateway']}/ops.html")
-        print(f"    Decoy portal:   http://localhost:{PORTS['gateway']}/portal")
         if public_url and _is_public(public_url):
             print(f"    Public (tunnel): {public_url}   (webhooks + sandbox agent use this)")
         else:

@@ -26,25 +26,12 @@ services:
       - "8001:8001"
     restart: unless-stopped
 
-  portal:
-    build: ./portal
-    env_file: ./.env
-    environment:
-      PROXY_URL: http://proxy:8000
-      ORCHESTRATOR_URL: http://backend:8001
-    depends_on:
-      proxy:
-        condition: service_healthy
-    restart: unless-stopped
-
   frontend:
     build: ./frontend
     depends_on:
       backend:
         condition: service_healthy
       proxy:
-        condition: service_healthy
-      portal:
         condition: service_healthy
     ports:
       - "3000:80"

@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS personas (
     id TEXT PRIMARY KEY,
     engagement_id TEXT REFERENCES engagements(id) ON DELETE CASCADE,
     username TEXT NOT NULL,
-    password TEXT NOT NULL,                       -- decoy credential, handed to the scammer's portal
+    password TEXT NOT NULL,                       -- decoy credential the phished login uses
     email TEXT NOT NULL,                          -- inbox+persona_<id>@...
     customer_id TEXT,
     first_name TEXT,

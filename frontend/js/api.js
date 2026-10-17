@@ -86,15 +86,6 @@ export function normCustomer(c) {
   };
 }
 
-async function listOrEmpty(path, kind) {
-  try {
-    return asList(await request("GET", path)).map((t) => normTxn(t, kind));
-  } catch (e) {
-    if (e.status === 404) return [];
-    throw e;
-  }
-}
-
 function customerId() {
   const id = session.get()?.customer_id;
   if (!id) throw new ApiError(401, "Not signed in");
@@ -151,16 +142,21 @@ export const live = {
     return normAccount(unwrap(r));
   },
 
-  // Transfers come back for both sides (payer and payee); deduplicate by id.
+  // Nessie v2 lists an account's activity at /transactions (the per-type paths are POST-only). Each
+  // row carries its own kind (deposit|transfer|withdrawal). Deduplicate by id.
   async activity(accountId) {
     const id = encodeURIComponent(accountId);
-    const [transfers, deposits, withdrawals] = await Promise.all([
-      listOrEmpty(`/accounts/${id}/transfers`, "transfer"),
-      listOrEmpty(`/accounts/${id}/deposits`, "deposit"),
-      listOrEmpty(`/accounts/${id}/withdrawals`, "withdrawal"),
-    ]);
+    let rows;
+    try {
+      rows = asList(await request("GET", `/accounts/${id}/transactions`));
+    } catch (e) {
+      if (e.status === 404 || e.status === 405) return [];
+      throw e;
+    }
     const seen = new Set();
-    return [...transfers, ...deposits, ...withdrawals].filter((t) => !t.id || (!seen.has(t.id) && seen.add(t.id)));
+    return rows
+      .map((t) => normTxn(t, (t.kind || t.type || "transaction").toLowerCase()))
+      .filter((t) => !t.id || (!seen.has(t.id) && seen.add(t.id)));
   },
 
   async transfer({ fromId, toId, amount, description }) {
