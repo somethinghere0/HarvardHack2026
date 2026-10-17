@@ -1,29 +1,46 @@
+x-hardening: &hardening
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  restart: unless-stopped
+
 services:
   proxy:
+    <<: *hardening
     build: ./proxy
     env_file: ./proxy/.env
+    read_only: true
+    tmpfs: [/tmp]
     volumes:
       - proxy-data:/data
-    restart: unless-stopped
+    # No published port: only the backend can reach the Nessie key holder.
 
   backend:
+    <<: *hardening
     build: ./backend
+    env_file:
+      - path: ./backend/.env
+        required: false
     environment:
       PROXY_URL: http://proxy:8000
+    read_only: true
+    tmpfs: [/tmp]
+    volumes:
+      - backend-data:/data
     depends_on:
       proxy:
         condition: service_healthy
     ports:
-      - "8001:8001"
-    restart: unless-stopped
+      - "127.0.0.1:8001:8001"
 
   frontend:
     build: ./frontend
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
     depends_on:
       - backend
     ports:
-      - "3000:80"
-    restart: unless-stopped
+      - "127.0.0.1:3000:80"
 
 volumes:
   proxy-data:
+  backend-data:

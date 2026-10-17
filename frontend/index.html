@@ -3,10 +3,58 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>HarvardHack2026</title>
+  <title>Scam Gateway</title>
+  <style>
+    :root { color-scheme: light dark; --bad:#c62828; --ok:#2e7d32; --hold:#b26a00; }
+    body { font: 15px/1.45 system-ui, sans-serif; margin: 0 auto; max-width: 1000px; padding: 24px 16px; }
+    h1 { margin: 0 0 4px; } .sub { opacity: .7; margin: 0 0 20px; }
+    .stats { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    .stat { border: 1px solid #8884; border-radius: 8px; padding: 10px 16px; min-width: 110px; }
+    .stat b { display: block; font-size: 26px; }
+    .card { border: 1px solid #8884; border-left-width: 5px; border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
+    .released { border-left-color: var(--ok); } .blocked { border-left-color: var(--bad); } .held { border-left-color: var(--hold); }
+    .tag { font-size: 12px; font-weight: 600; text-transform: uppercase; }
+    .released .tag { color: var(--ok); } .blocked .tag { color: var(--bad); } .held .tag { color: var(--hold); }
+    .meta { opacity: .7; font-size: 13px; } code { word-break: break-all; font-size: 13px; }
+    ul { margin: 6px 0; padding-left: 20px; } img { max-width: 100%; border-radius: 6px; margin-top: 8px; border: 1px solid #8884; }
+    #err { color: var(--bad); }
+  </style>
 </head>
 <body>
-  <h1>HarvardHack2026</h1>
-  <p>Frontend placeholder.</p>
+  <h1>Scam Gateway</h1>
+  <p class="sub">Every incoming email is held until it is verified. The inbox only receives mail that passed.</p>
+  <div class="stats" id="stats"></div>
+  <p id="err"></p>
+  <div id="list"></div>
+  <script>
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    function render(items) {
+      const counts = { released: 0, blocked: 0, held: 0 };
+      items.forEach(d => counts[d.action]++);
+      const stats = document.getElementById('stats'); stats.replaceChildren();
+      for (const [k, v] of Object.entries(counts)) { const s = el('div', 'stat'); s.append(el('b', null, v), k); stats.append(s); }
+      const list = document.getElementById('list'); list.replaceChildren();
+      if (!items.length) list.append(el('p', 'meta', 'No mail processed yet.'));
+      for (const d of items) {
+        const c = el('div', 'card ' + d.action);
+        c.append(el('div', 'tag', d.action + ' · ' + d.reason), el('div', null, d.subject || '(no subject)'),
+                 el('div', 'meta', d.sender + ' · ' + new Date(d.at).toLocaleString()));
+        if (d.evidence.length) { const ul = el('ul'); d.evidence.forEach(e => ul.append(el('li', null, e))); c.append(ul); }
+        if (d.destinations.length) {
+          c.append(el('div', 'meta', 'Where the scammer sent our decoy data:'));
+          const ul = el('ul'); d.destinations.forEach(u => ul.append(el('li', null, u))); c.append(ul);
+        }
+        if (d.screenshot) { const i = el('img'); i.loading = 'lazy'; i.alt = 'Page as seen in the sandbox'; i.src = '/api/evidence/' + encodeURIComponent(d.screenshot); c.append(i); }
+        list.append(c);
+      }
+    }
+    async function load() {
+      try {
+        const r = await fetch('/api/decisions'); if (!r.ok) throw new Error(r.status);
+        render(await r.json()); document.getElementById('err').textContent = '';
+      } catch (e) { document.getElementById('err').textContent = 'Cannot reach the gateway (' + e.message + ')'; }
+    }
+    load(); setInterval(load, 5000);
+  </script>
 </body>
 </html>
