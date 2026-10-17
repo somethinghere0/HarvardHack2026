@@ -43,9 +43,19 @@ def main() -> None:
     gmail.ensure_label(s.gmail_safe_label)
     print(f"Email firewall: {s.gmail_address} [{s.gmail_source_label}] -> {orch} "
           f"(archive scams: {s.gmail_archive_scams})")
+    empty_polls = 0
     while True:
         try:
-            for m in gmail.list_recent(s.gmail_source_label, limit=WATCH_LIMIT):
+            batch = gmail.list_recent(s.gmail_source_label, limit=WATCH_LIMIT)
+            if not batch:
+                empty_polls += 1
+                if empty_polls in (1, 6):  # hint once early, once after ~1 min of nothing
+                    print(f"[watcher] no mail seen in {s.gmail_source_label}. If this persists, enable "
+                          "IMAP in Gmail settings and check GMAIL_ADDRESS/GMAIL_APP_PASSWORD.")
+            else:
+                empty_polls = 0
+                print(f"[watcher] polled {len(batch)} message(s) in {s.gmail_source_label}")
+            for m in batch:
                 if _is_our_mail(s, m):
                     continue
                 try:

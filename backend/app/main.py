@@ -191,7 +191,16 @@ async def vet_email(sender: str, subject: str, text: str, gmail_id: str | None =
     and the action the mail client should take: deliver (safe) or quarantine (scam)."""
     if gmail_id and db.message_seen(s.db_path, gmail_id):
         return {"already_processed": True}
-    verdict = classifier.classify(s, sender, subject, text)
+    try:
+        verdict = classifier.classify(s, sender, subject, text)
+    except Exception as e:
+        # Never silently drop an email — record it so it still appears on the tracker, flagged for review.
+        print(f"[orchestrator] classify failed: {e}")
+        db.add_message(s.db_path, {
+            "gmail_id": gmail_id, "sender": sender, "subject": subject, "body": text,
+            "verdict": "error", "reason": str(e)[:200], "action": "review",
+        })
+        return {"verdict": "error", "action": "review", "error": str(e)}
     is_scam = bool(verdict.get("is_scam"))
     action = "quarantined" if is_scam else "delivered"
     eid = None
