@@ -36,9 +36,7 @@ async function renderStatus() {
       : m === "polling" || m === "local" ? "local" : "fake");  // 'missing' shows grey
     const chip = (name, mode) => h("span", { class: `svc ${cls(mode)}` },
       h("span", { class: "dot" }), `${name}: ${mode}`);
-    strip.replaceChildren(
-      ...Object.entries(st.services).map(([k, v]) => chip(k, v)),
-      h("span", { class: "svc fake" }, h("span", { class: "dot" }), `OTP: ${st.otp_mode}`));
+    strip.replaceChildren(...Object.entries(st.services).map(([k, v]) => chip(k, v)));
   } catch { /* status is best-effort */ }
 }
 
