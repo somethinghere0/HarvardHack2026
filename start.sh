@@ -29,7 +29,7 @@ fi
 # 3. core deps (quiet, idempotent) — everything is live, so Claude is always needed
 echo "  installing dependencies…"
 "$PIP" install -q --upgrade pip >/dev/null
-"$PIP" install -q fastapi "uvicorn[standard]" httpx argon2-cffi python-multipart anthropic
+"$PIP" install -q fastapi "uvicorn[standard]" httpx argon2-cffi python-multipart anthropic certifi
 
 # 4. integration deps based on .env (non-fatal: a failed optional install shouldn't stop startup)
 haskey() { grep -qE "^$1=[^[:space:]]" .env; }

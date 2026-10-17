@@ -59,8 +59,17 @@ CREATE TABLE IF NOT EXISTS emails (
     body TEXT,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS shots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    engagement_id TEXT REFERENCES engagements(id) ON DELETE CASCADE,
+    step INTEGER NOT NULL DEFAULT 0,
+    label TEXT,
+    image TEXT NOT NULL,                           -- data: URL (jpeg base64) of the agent's browser
+    created_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS ix_events_eng ON events(engagement_id, id);
 CREATE INDEX IF NOT EXISTS ix_personas_eng ON personas(engagement_id);
+CREATE INDEX IF NOT EXISTS ix_shots_eng ON shots(engagement_id, id);
 """
 
 
@@ -242,3 +251,18 @@ def list_emails(path: str, eid: str) -> list[dict]:
     with connect(path) as c:
         return [_row(r) for r in c.execute(
             "SELECT * FROM emails WHERE engagement_id = ? ORDER BY id", (eid,)).fetchall()]
+
+
+# ---- agent screenshots ----------------------------------------------------
+
+def add_shot(path: str, eid: str, step: int, label: str | None, image: str) -> None:
+    with connect(path) as c:
+        c.execute("INSERT INTO shots (engagement_id, step, label, image, created_at) VALUES (?, ?, ?, ?, ?)",
+                  (eid, step, label, image, now()))
+
+
+def list_shots(path: str, eid: str) -> list[dict]:
+    with connect(path) as c:
+        return [_row(r) for r in c.execute(
+            "SELECT step, label, image, created_at FROM shots WHERE engagement_id = ? ORDER BY id",
+            (eid,)).fetchall()]

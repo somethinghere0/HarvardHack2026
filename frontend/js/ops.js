@@ -91,6 +91,14 @@ async function renderDetail(id) {
         h("span", { class: "src" }, ev.source),
         h("span", {}, ev.type + eventDetail(ev))))));
 
+  const shots = (d.shots || []);
+  const filmstrip = shots.length ? h("div", { class: "card" },
+    h("h3", { style: "font-size:14px;margin-bottom:10px" }, "Agent's browser (sandbox)"),
+    h("div", { class: "filmstrip" }, ...shots.map((sh) =>
+      h("figure", { class: "shot" },
+        h("img", { src: sh.image, alt: sh.label || "" , loading: "lazy" }),
+        h("figcaption", {}, `${sh.step}. ${sh.label || ""}`))))) : null;
+
   const emails = d.emails.length ? h("div", { class: "card" },
     h("h3", { style: "font-size:14px;margin-bottom:10px" }, "Messages"),
     ...d.emails.map((m) => h("div", { style: "border-bottom:1px solid var(--line-2);padding:8px 0" },
@@ -104,7 +112,7 @@ async function renderDetail(id) {
       h("span", { class: `risk ${riskClass(eng.risk_score)}`, style: "font-size:22px" }, eng.risk_score + "/100")),
     eng.summary && h("p", { class: "muted", style: "margin:-6px 0 2px" }, eng.summary),
     h("div", { class: "pills" }, h("span", { class: "pill" }, eng.status), ...(eng.tags || []).map((t) => h("span", { class: "pill danger" }, t.replace(/_/g, " ")))),
-    personaCard, indCard, timeline, emails));
+    personaCard, filmstrip, indCard, timeline, emails));
 }
 
 function eventDetail(ev) {

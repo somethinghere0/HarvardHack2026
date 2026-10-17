@@ -49,6 +49,14 @@ def load_dotenv() -> None:
 def env(**over) -> dict:
     e = dict(os.environ)
     e.setdefault("PYTHONUNBUFFERED", "1")
+    # macOS python.org builds ship no CA bundle, so outbound TLS (Daytona API, Gmail SMTP) fails with
+    # CERTIFICATE_VERIFY_FAILED. Point OpenSSL/requests at certifi's bundle.
+    try:
+        import certifi
+        e.setdefault("SSL_CERT_FILE", certifi.where())
+        e.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
+    except Exception:
+        pass
     e.update({k: str(v) for k, v in over.items()})
     return e
 

@@ -152,6 +152,7 @@ def get_engagement(eid: str):
         "engagement": eng,
         "events": db.list_events(s.db_path, eid),
         "emails": db.list_emails(s.db_path, eid),
+        "shots": db.list_shots(s.db_path, eid),
         "indicators": indicators.compute(s.db_path, eid),
     }
 
@@ -255,6 +256,16 @@ async def internal_send_otp(body: dict, x_internal_secret: str = Header(None)):
         print(f"[orchestrator] OTP email failed ({e}); code still retrievable via /internal/otp")
     db.add_event(s.db_path, persona["engagement_id"], "system", "otp.sent",
                  {"emailed": emailed, "to": persona["email"]})
+    return {"ok": True}
+
+
+@app.post("/internal/agent-shot")
+async def internal_agent_shot(body: dict, x_internal_secret: str = Header(None)):
+    """A screenshot from the sandbox agent's browser — the fraud monitor shows these as a filmstrip."""
+    _check_internal(x_internal_secret)
+    eid = body.get("engagement_id")
+    if eid and body.get("image"):
+        db.add_shot(s.db_path, eid, int(body.get("step", 0)), body.get("label"), body["image"])
     return {"ok": True}
 
 

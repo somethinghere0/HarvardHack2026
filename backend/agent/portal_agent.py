@@ -46,6 +46,20 @@ def report(type_: str, data: dict) -> None:
         pass
 
 
+def send_shot(page, step: int, label: str) -> None:
+    """Stream a screenshot of the agent's browser to the orchestrator for the live filmstrip."""
+    try:
+        import base64
+        png = page.screenshot(type="jpeg", quality=45, full_page=False)
+        img = "data:image/jpeg;base64," + base64.b64encode(png).decode()
+        httpx.post(f"{ORCH}/internal/agent-shot",
+                   json={"engagement_id": os.environ.get("ENGAGEMENT_ID"), "step": step,
+                         "label": label, "image": img},
+                   headers={"X-Internal-Secret": SECRET}, timeout=20)
+    except Exception:
+        pass
+
+
 def fetch_otp() -> str:
     pid = os.environ["PERSONA_ID"]
     for _ in range(60):
@@ -104,8 +118,9 @@ def main() -> None:
     report("agent.started", {"portal": os.environ["PORTAL_URL"]})
     with sync_playwright() as p:
         browser = p.chromium.launch(args=["--no-sandbox"])
-        page = browser.new_page()
+        page = browser.new_page(viewport={"width": 1000, "height": 720})
         page.goto(os.environ["PORTAL_URL"], wait_until="domcontentloaded", timeout=30000)
+        send_shot(page, 0, "opened portal")
         for step in range(MAX_STEPS):
             snap = snapshot(page)
             try:
@@ -136,6 +151,7 @@ def main() -> None:
                     page.wait_for_load_state("networkidle", timeout=8000)
                 except Exception:
                     pass
+            send_shot(page, step + 1, action.get("observation") or f"step {step + 1}")
             if action.get("done"):
                 break
         browser.close()
