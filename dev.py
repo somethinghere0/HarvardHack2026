@@ -42,6 +42,11 @@ def load_dotenv() -> None:
         os.environ.setdefault(k.strip(), v)
 
 
+def _is_public(url: str) -> bool:
+    """A URL a remote service (real Nessie) could actually reach — i.e. not localhost."""
+    return bool(url) and not any(h in url for h in ("localhost", "127.0.0.1", "::1", "0.0.0.0"))
+
+
 def env(**over) -> dict:
     e = dict(os.environ)
     e.setdefault("PYTHONUNBUFFERED", "1")
