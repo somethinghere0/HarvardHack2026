@@ -74,6 +74,68 @@ class Gmail:
         M.login(self.s.gmail_address, self.s.gmail_app_password)
         return M
 
+    def list_recent(self, folder: str = "INBOX", limit: int = 25) -> list[dict]:
+        """Every recent message in a folder (read or unread), newest last, each with its stable Gmail
+        message id (X-GM-MSGID) so the firewall vets each email exactly once. app-password mode."""
+        out = []
+        with self._imap() as M:
+            typ, _ = M.select(folder)
+            if typ != "OK":
+                return out
+            typ, data = M.uid("search", None, "ALL")
+            if typ != "OK" or not data or not data[0]:
+                return out
+            uids = data[0].split()[-limit:]
+            for uid in uids:
+                t, fetched = M.uid("fetch", uid, "(X-GM-MSGID BODY.PEEK[])")
+                if t != "OK" or not fetched:
+                    continue
+                raw, gm_id = None, None
+                for part in fetched:
+                    if isinstance(part, tuple) and len(part) == 2:
+                        meta = part[0].decode("utf-8", "replace") if isinstance(part[0], bytes) else str(part[0])
+                        m = __import__("re").search(r"X-GM-MSGID\s+(\d+)", meta)
+                        if m:
+                            gm_id = m.group(1)
+                        raw = part[1]
+                if not raw:
+                    continue
+                msg = email.message_from_bytes(raw)
+                out.append({
+                    "gmail_id": gm_id or f"uid:{uid.decode()}", "uid": uid.decode(), "folder": folder,
+                    "sender": msg.get("From", ""), "recipient": msg.get("To", ""),
+                    "subject": msg.get("Subject", ""), "body": _imap_body(msg),
+                })
+        return out
+
+    def ensure_label(self, label: str) -> None:
+        if not label:
+            return
+        try:
+            with self._imap() as M:
+                M.create(f'"{label}"')  # no-op error if it already exists
+        except Exception:
+            pass
+
+    def apply_label(self, uid: str, label: str, folder: str = "INBOX") -> None:
+        """Add a Gmail label by copying the message into that label's folder (non-destructive)."""
+        if not label:
+            return
+        with self._imap() as M:
+            M.select(folder)
+            M.uid("copy", uid, f'"{label}"')
+
+    def archive(self, uid: str, folder: str = "INBOX") -> None:
+        """Remove a message from a folder/label (archive). On Gmail this just drops that label — the
+        message stays in All Mail; it is NOT trashed. Used only when gmail_archive_scams is on."""
+        with self._imap() as M:
+            M.select(folder)
+            M.uid("store", uid, "+FLAGS", "(\\Deleted)")
+            try:
+                M.uid("expunge", uid)         # UIDPLUS: expunge only this message
+            except Exception:
+                M.expunge()
+
     def _imap_unread(self) -> list[dict]:
         out = []
         with self._imap() as M:

@@ -183,47 +183,77 @@ async def _run_agent_task(eid: str):
         db.add_event(s.db_path, eid, "system", "agent.error", {"error": str(e)})
 
 
-# --- simulation endpoints (demo; local only) -------------------------------
+# --- email firewall: vet every inbound email -------------------------------
+
+async def vet_email(sender: str, subject: str, text: str, gmail_id: str | None = None) -> dict:
+    """The core: classify one inbound email, record it on the dashboard, and for a credential-phishing
+    scam spin up a honeypot engagement (decoy persona + reply + sandbox agent). Returns the verdict
+    and the action the mail client should take: deliver (safe) or quarantine (scam)."""
+    if gmail_id and db.message_seen(s.db_path, gmail_id):
+        return {"already_processed": True}
+    verdict = classifier.classify(s, sender, subject, text)
+    is_scam = bool(verdict.get("is_scam"))
+    action = "quarantined" if is_scam else "delivered"
+    eid = None
+    if is_scam:
+        eid = secrets.token_hex(8)
+        db.create_engagement(s.db_path, eid, "email", sender, subject)
+        db.add_email(s.db_path, eid, "in", "scam", sender, s.gmail_address, subject, text)
+        db.add_event(s.db_path, eid, "gmail", "email.scam_detected", verdict)
+        if verdict.get("portal_url"):
+            db.add_event(s.db_path, eid, "gmail", "portal.detected", {"url": verdict["portal_url"]})
+        # Only credential-phishing is worth the full decoy-login honeypot; other scams are quarantined
+        # and shown, without burning a sandbox.
+        if verdict.get("vector") == "credential_phishing":
+            persona = await personas.create_persona(s, eid)
+            reply = responder.draft_reply(s, verdict.get("vector"),
+                                          {"first_name": persona_firstname(persona)}, f"{subject}\n{text}")
+            try:
+                gmail.send(sender, f"Re: {subject}", reply)
+                db.add_email(s.db_path, eid, "out", "reply", persona["email"], sender, f"Re: {subject}", reply)
+                db.add_event(s.db_path, eid, "agent", "reply.sent", {"vector": verdict.get("vector")})
+            except Exception as e:
+                db.add_event(s.db_path, eid, "agent", "reply.failed", {"error": str(e)})
+            asyncio.create_task(_run_agent_task(eid))
+        db.update_engagement(s.db_path, eid, status="baited",
+                             summary=f"{verdict.get('vector')} ({int(verdict.get('confidence', 0) * 100)}% conf.)")
+    db.add_message(s.db_path, {
+        "gmail_id": gmail_id, "sender": sender, "subject": subject, "body": text,
+        "verdict": "scam" if is_scam else "safe", "vector": verdict.get("vector"),
+        "confidence": verdict.get("confidence"), "reason": verdict.get("reason"),
+        "action": action, "engagement_id": eid,
+    })
+    return {"verdict": "scam" if is_scam else "safe", "action": action,
+            "engagement_id": eid, "classification": verdict}
+
+
+@app.post("/ingest-email")
+async def ingest_email(body: dict):
+    """Vet one real inbound email (called by the Gmail watcher). Body: {gmail_id, sender, subject, body}."""
+    return await vet_email(body.get("sender", ""), body.get("subject", ""),
+                           body.get("body", ""), body.get("gmail_id"))
+
+
+@app.get("/messages")
+def list_messages():
+    """Every email the firewall has vetted, newest first — safe (delivered) and scam (quarantined)."""
+    return {"messages": db.list_messages(s.db_path)}
+
+
+# --- simulation endpoints (manual triggers for the demo) -------------------
 
 @app.post("/sim/inbound-email")
 async def sim_inbound_email(body: dict):
-    """Simulate a scam email arriving. Body: {sender, subject, body}. Classifies, and if it looks
-    like a scam, opens an engagement with a fresh persona and drafts a decoy reply."""
-    sender, subject, text = body.get("sender", ""), body.get("subject", ""), body.get("body", "")
-    verdict = classifier.classify(s, sender, subject, text)
-    if not verdict.get("is_scam"):
-        return {"opened": False, "classification": verdict}
-    eid = secrets.token_hex(8)
-    db.create_engagement(s.db_path, eid, "email", sender, subject)
-    db.add_email(s.db_path, eid, "in", "scam", sender, s.gmail_address, subject, text)
-    db.add_event(s.db_path, eid, "gmail", "email.scam_detected", verdict)
-    # If the email named a portal URL, record it so the agent targets the real phishing site.
-    if verdict.get("portal_url"):
-        db.add_event(s.db_path, eid, "gmail", "portal.detected", {"url": verdict["portal_url"]})
-    persona = await personas.create_persona(s, eid)
-    reply = responder.draft_reply(s, verdict.get("vector", "unknown"),
-                                  {"first_name": persona_firstname(persona)}, f"{subject}\n{text}")
-    try:  # replying needs Gmail; don't let a mail hiccup abort the engagement
-        gmail.send(sender, f"Re: {subject}", reply)
-        db.add_email(s.db_path, eid, "out", "reply", persona["email"], sender, f"Re: {subject}", reply)
-        db.add_event(s.db_path, eid, "agent", "reply.sent", {"vector": verdict.get("vector")})
-    except Exception as e:
-        db.add_event(s.db_path, eid, "agent", "reply.failed", {"error": str(e)})
-    db.update_engagement(s.db_path, eid, status="baited",
-                         summary=f"{verdict.get('vector')} ({int(verdict.get('confidence',0)*100)}% conf.)")
-    return {"opened": True, "engagement_id": eid, "classification": verdict,
-            "persona": _safe_persona(persona)}
+    return await vet_email(body.get("sender", ""), body.get("subject", ""), body.get("body", ""))
 
 
 @app.post("/sim/run-full")
-async def sim_run_full(body: dict, background: BackgroundTasks):
-    """One-click demo: inbound scam email -> engagement -> run the decoy agent (login + drain)."""
-    res = await sim_inbound_email(body or {"sender": "alerts@secure-verify.example",
-                                           "subject": "Unusual activity on your account",
-                                           "body": "We detected unusual activity. Verify your login now."})
-    if res.get("opened"):
-        background.add_task(_run_agent_task, res["engagement_id"])
-    return res
+async def sim_run_full(body: dict):
+    """One-click demo: inject a credential-phishing email -> engagement -> decoy agent runs."""
+    return await vet_email(
+        (body or {}).get("sender", "alerts@secure-verify.example"),
+        (body or {}).get("subject", "Unusual activity on your account"),
+        (body or {}).get("body", "We detected unusual activity. Verify your login now at the link."))
 
 
 # --- internal API (called by the proxy; shared-secret guarded) -------------

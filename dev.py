@@ -112,6 +112,11 @@ def main() -> None:
                         DEV_PORTAL_URL=f"http://127.0.0.1:{PORTS['portal']}"))
         wait_health(f"http://127.0.0.1:{PORTS['gateway']}/", "gateway")
 
+        # Email firewall: vet every inbound Gmail message (needs an app password).
+        if os.environ.get("GMAIL_APP_PASSWORD", "").strip():
+            spawn("watcher", [PY, "backend/scripts/gmail_watcher.py"], ROOT,
+                  env(ORCHESTRATOR_URL=f"http://127.0.0.1:{PORTS['orch']}"))
+
         # Optional: run a named cloudflared tunnel from a token (START_TUNNEL=1). If you run your own
         # quick tunnel, leave this off and set PUBLIC_URL to the printed URL.
         import shutil

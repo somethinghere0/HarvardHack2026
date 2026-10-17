@@ -1,11 +1,14 @@
-"""Polls the real Gmail inbox and feeds inbound mail to the orchestrator. Real mode only — in FAKE
-mode use the /api/sim endpoints instead. Run alongside the orchestrator:
+"""Email firewall. Polls the Gmail account and vets EVERY recent email: each is sent to the
+orchestrator, which classifies it, records it on the dashboard, and (for credential-phishing) spins
+up the honeypot. The watcher then acts on the verdict in Gmail — label scams as quarantined (and
+optionally archive them out of the inbox), label safe mail as delivered.
 
-    GMAIL_FAKE=0 python backend/scripts/gmail_watcher.py
+App-password (SMTP/IMAP) mode only. Run alongside the stack:
+    python backend/scripts/gmail_watcher.py
 
-Each unread message is routed by recipient: mail to inbox+persona_<id>@... that comes from our own
-Honeybank OTP sender is recorded as an OTP for that persona; anything else is handed to
-/sim/inbound-email for classification (which opens an engagement if it looks like a scam)."""
+True pre-inbox holding: add a Gmail filter "Matches: *  ->  Skip the Inbox, Apply label: HoneybankPending"
+and set GMAIL_SOURCE_LABEL=HoneybankPending. Then only mail this firewall clears (safe) is moved to
+the inbox; everything else stays out of it."""
 from __future__ import annotations
 
 import os
@@ -19,36 +22,54 @@ from app.config import settings  # noqa: E402
 from app.gmail_client import Gmail  # noqa: E402
 
 POLL_SECONDS = int(os.environ.get("WATCH_POLL_SECONDS", "10"))
+WATCH_LIMIT = int(os.environ.get("WATCH_LIMIT", "25"))
+
+
+def _is_our_mail(s, m: dict) -> bool:
+    """Skip the OTP/reply mail this system sends to itself (persona sub-addresses)."""
+    local = s.gmail_address.split("@")[0].lower()
+    sender = (m.get("sender") or "").lower()
+    subj = (m.get("subject") or "").lower()
+    return local and local in sender and ("honeybank verification" in subj or subj.startswith("re:"))
 
 
 def main() -> None:
     s = settings()
+    if not s.gmail_app_password:
+        raise SystemExit("The firewall watcher needs GMAIL_APP_PASSWORD (SMTP/IMAP mode).")
     gmail = Gmail(s)
-    orch = os.environ.get("ORCHESTRATOR_PUBLIC_URL", "http://127.0.0.1:8001")
-    print(f"Watching {s.gmail_address} every {POLL_SECONDS}s -> {orch}")
+    orch = os.environ.get("ORCHESTRATOR_URL", "http://127.0.0.1:8001").rstrip("/")
+    gmail.ensure_label(s.gmail_quarantine_label)
+    gmail.ensure_label(s.gmail_safe_label)
+    print(f"Email firewall: {s.gmail_address} [{s.gmail_source_label}] -> {orch} "
+          f"(archive scams: {s.gmail_archive_scams})")
     while True:
         try:
-            for msg in gmail.list_unread():
-                _route(orch, s, msg)
-                gmail.mark_read(msg["id"])
+            for m in gmail.list_recent(s.gmail_source_label, limit=WATCH_LIMIT):
+                if _is_our_mail(s, m):
+                    continue
+                try:
+                    r = httpx.post(f"{orch}/ingest-email",
+                                   json={k: m.get(k) for k in ("gmail_id", "sender", "subject", "body")},
+                                   timeout=90).json()
+                except httpx.HTTPError as e:
+                    print(f"[watcher] ingest failed: {e}")
+                    continue
+                if r.get("already_processed"):
+                    continue
+                if r.get("verdict") == "scam":
+                    gmail.apply_label(m["uid"], s.gmail_quarantine_label, m["folder"])
+                    if s.gmail_archive_scams:
+                        gmail.archive(m["uid"], m["folder"])
+                    print(f"[SCAM {r.get('classification',{}).get('vector','')}] "
+                          f"{m.get('subject','')[:50]} -> quarantined")
+                else:
+                    if s.gmail_safe_label:
+                        gmail.apply_label(m["uid"], s.gmail_safe_label, m["folder"])
+                    print(f"[safe] {m.get('subject','')[:50]} -> delivered")
         except Exception as e:  # keep the loop alive
             print(f"[watcher] {type(e).__name__}: {e}")
         time.sleep(POLL_SECONDS)
-
-
-def _route(orch: str, s, msg: dict) -> None:
-    sender = msg.get("sender", "")
-    # Our own OTP mail: ignore here (the orchestrator already stored the code when it sent it).
-    if s.gmail_address.split("@")[0] in sender and "honeybank" in msg.get("subject", "").lower():
-        print(f"[watcher] OTP mail seen for {msg.get('recipient')}")
-        return
-    try:
-        httpx.post(f"{orch}/sim/inbound-email", json={
-            "sender": sender, "subject": msg.get("subject", ""), "body": msg.get("body", ""),
-        }, timeout=30)
-        print(f"[watcher] forwarded: {msg.get('subject','')[:60]}")
-    except httpx.HTTPError as e:
-        print(f"[watcher] forward failed: {e}")
 
 
 if __name__ == "__main__":

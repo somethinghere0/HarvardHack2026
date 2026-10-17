@@ -40,7 +40,28 @@ async function renderStatus() {
   } catch { /* status is best-effort */ }
 }
 
+async function renderInbox() {
+  try {
+    const { messages } = await api("/messages");
+    const el = document.getElementById("inbox");
+    document.getElementById("inbox-count").textContent =
+      `${messages.length} vetted · ${messages.filter((m) => m.verdict === "scam").length} scam`;
+    el.replaceChildren(...messages.map((m) => {
+      const scam = m.verdict === "scam";
+      const node = h("button", { class: `msg ${scam ? "scam" : "safe"}`,
+        onClick: scam && m.engagement_id ? () => select(m.engagement_id) : null },
+        h("span", { class: "vtag" }, m.verdict),
+        h("div", { style: "min-width:0" },
+          h("div", { class: "msub" }, m.subject || "(no subject)"),
+          h("div", { class: "mfrom" }, (m.sender || "") + (m.vector ? ` · ${m.vector}` : ""))),
+        h("span", { class: "maction" }, m.action || ""));
+      return node;
+    }));
+  } catch { /* inbox is best-effort */ }
+}
+
 async function refresh() {
+  await renderInbox();
   const { engagements } = await api("/engagements");
   countEl.textContent = `${engagements.length} engagement${engagements.length === 1 ? "" : "s"}`;
   listEl.replaceChildren(...engagements.map(engItem));

@@ -59,6 +59,20 @@ CREATE TABLE IF NOT EXISTS emails (
     body TEXT,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    gmail_id TEXT UNIQUE,                          -- source message id, so we vet each email once
+    sender TEXT,
+    subject TEXT,
+    body TEXT,
+    verdict TEXT NOT NULL DEFAULT 'pending',       -- safe|scam|suspicious
+    vector TEXT,
+    confidence REAL,
+    reason TEXT,
+    action TEXT,                                   -- delivered|quarantined
+    engagement_id TEXT,                            -- set when a scam spawns a honeypot engagement
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS shots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     engagement_id TEXT REFERENCES engagements(id) ON DELETE CASCADE,
@@ -251,6 +265,39 @@ def list_emails(path: str, eid: str) -> list[dict]:
     with connect(path) as c:
         return [_row(r) for r in c.execute(
             "SELECT * FROM emails WHERE engagement_id = ? ORDER BY id", (eid,)).fetchall()]
+
+
+# ---- messages (inbox firewall log) ----------------------------------------
+
+def message_seen(path: str, gmail_id: str) -> bool:
+    if not gmail_id:
+        return False
+    with connect(path) as c:
+        return c.execute("SELECT 1 FROM messages WHERE gmail_id = ?", (gmail_id,)).fetchone() is not None
+
+
+def add_message(path: str, m: dict) -> int:
+    with connect(path) as c:
+        cur = c.execute(
+            "INSERT OR IGNORE INTO messages (gmail_id, sender, subject, body, verdict, vector, "
+            "confidence, reason, action, engagement_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (m.get("gmail_id"), m.get("sender"), m.get("subject"), m.get("body"), m.get("verdict", "pending"),
+             m.get("vector"), m.get("confidence"), m.get("reason"), m.get("action"),
+             m.get("engagement_id"), now()),
+        )
+        return cur.lastrowid
+
+
+def list_messages(path: str, limit: int = 100) -> list[dict]:
+    with connect(path) as c:
+        rows = c.execute("SELECT * FROM messages ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    out = []
+    for r in rows:
+        d = _row(r)
+        if d.get("body"):
+            d["body"] = d["body"][:600]  # keep the list payload small
+        out.append(d)
+    return out
 
 
 # ---- agent screenshots ----------------------------------------------------

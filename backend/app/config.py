@@ -35,6 +35,14 @@ class Settings:
     gmail_credentials_file: str = os.environ.get("GMAIL_CREDENTIALS_FILE", "./secrets/gmail_oauth.json")
     gmail_token_file: str = os.environ.get("GMAIL_TOKEN_FILE", "./secrets/gmail_token.json")
 
+    # Email-firewall behaviour. The watcher reads from gmail_source_label (INBOX, or a holding label
+    # fed by a Gmail filter for true pre-inbox vetting), labels each email Safe/Scam, and — only if
+    # gmail_archive_scams is on — removes scams from the inbox (archive, never trash; reversible).
+    gmail_source_label: str = os.environ.get("GMAIL_SOURCE_LABEL", "INBOX")
+    gmail_quarantine_label: str = os.environ.get("GMAIL_QUARANTINE_LABEL", "Honeybank/Quarantine")
+    gmail_safe_label: str = os.environ.get("GMAIL_SAFE_LABEL", "Honeybank/Safe")
+    gmail_archive_scams: bool = os.environ.get("GMAIL_ARCHIVE_SCAMS", "0").strip().lower() in ("1", "true", "yes", "on")
+
     # Daytona (one disposable sandbox per engagement for the decoy agent).
     daytona_api_key: str = os.environ.get("DAYTONA_API_KEY", "").strip()
     daytona_api_url: str = os.environ.get("DAYTONA_API_URL", "").strip()

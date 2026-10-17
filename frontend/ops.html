@@ -48,6 +48,19 @@
     .shot { margin: 0; flex: 0 0 auto; width: 260px; }
     .shot img { width: 260px; border: 1px solid var(--line); border-radius: 8px; display: block; background: #fff; }
     .shot figcaption { font-size: 11.5px; color: var(--muted); margin-top: 5px; }
+    .inbox-wrap { grid-column: 1 / -1; }
+    .inbox { display: grid; gap: 7px; }
+    .msg { display: grid; grid-template-columns: 78px 1fr auto; gap: 12px; align-items: center;
+      background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--ok);
+      border-radius: 10px; padding: 9px 13px; font-size: 13px; text-align: left; font: inherit; cursor: default; width: 100%; }
+    .msg.scam { border-left-color: var(--red); cursor: pointer; }
+    .msg .vtag { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+    .msg.safe .vtag { color: var(--ok); } .msg.scam .vtag { color: var(--red-600); }
+    .msg .mfrom { color: var(--muted); font-size: 11.5px; }
+    .msg .msub { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .msg .maction { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; }
+    .msg.safe .maction { background: var(--okbg); color: var(--ok); }
+    .msg.scam .maction { background: var(--errbg); color: var(--red-600); }
     .status-strip { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .svc { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px; display: inline-flex; gap: 6px; align-items: center; }
     .svc .dot { width: 7px; height: 7px; border-radius: 50%; }
@@ -62,6 +75,10 @@
     <div class="topbar-right"><span class="badge badge-live" id="count">0 engagements</span></div></header>
   <main class="ops">
     <div class="status-strip" id="status"></div>
+    <div class="inbox-wrap">
+      <div class="group-head" style="margin:4px 2px 8px"><h3>Inbox — every email, vetted</h3><span class="group-sum" id="inbox-count"></span></div>
+      <div class="inbox" id="inbox"></div>
+    </div>
     <div class="ops-head">
       <h2 style="font-size:16px">Engagements</h2>
       <div class="controls">
