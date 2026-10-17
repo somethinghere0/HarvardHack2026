@@ -22,25 +22,29 @@ scam email ─▶ Gmail watcher ─▶ orchestrator ──┬─▶ proxy ─▶
 | `backend` | `backend/` | 8001 | Orchestrator: persona/engagement lifecycle, Nessie webhook receiver + event timeline, indicator engine, OTP email, decoy agent runner. |
 | `frontend` | `frontend/` | 3000 | `/` the bait bank (vanilla JS); `/ops.html` the fraud monitor. nginx routes `/bank-api`→proxy, `/api`→backend. |
 
-## Run it locally (no Docker, no keys)
+## Run it locally — one command, no Docker, no keys
 
-Every external service (Nessie, Gmail, Daytona, Photon, Anthropic) has a built-in **fake** so the
-whole thing runs offline. Defaults in `.env.example` keep all fakes on.
+Every external service (Nessie, Gmail, Daytona, Photon, Anthropic) has a built-in **fake**, so the
+whole thing runs offline. `start.sh` makes the virtualenv, installs deps, and creates `.env` on the
+first run — just:
 
 ```bash
-cp .env.example .env
-pip install fastapi "uvicorn[standard]" httpx argon2-cffi faker
-python dev.py
+./start.sh
 ```
 
-- Bait bank: http://localhost:3000/
-- Fraud monitor: http://localhost:3000/ops.html — click **Simulate scam + drain** to run the full
-  pipeline (classify → build persona → decoy logs in, clearing OTP → scammer drains to a mule →
-  indicators light up).
+(or `make start`). Then open:
+
+- **Bait bank** → http://localhost:3000/
+- **Fraud monitor** → http://localhost:3000/ops.html — a status strip shows which services are live
+  vs. faked. Click **Simulate scam + drain** to run the full pipeline (classify → build persona →
+  decoy logs in, clearing OTP → scammer drains to a mule → indicators light up to risk 100).
+
+`Ctrl+C` stops it; `make stop` frees the ports if a run gets stuck.
 
 ## Go live, one service at a time
 
-Flip a `FAKE` flag to `0` in `.env` and fill its keys:
+Edit `.env` (don't put inline `# comments` after a value), flip a `FAKE` flag to `0`, fill its keys,
+and re-run `./start.sh` — it installs that integration's extra deps automatically:
 
 - **Nessie** (`NESSIE_FAKE=0`): get a key at https://v2.nessieisreal.com/. Amounts are integer cents.
 - **Cloudflare tunnel**: Nessie webhooks need a public URL back to this machine. Quick tunnel:

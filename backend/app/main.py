@@ -52,6 +52,21 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/status")
+def status():
+    """Which services are live vs. faked — powers the dashboard's setup strip."""
+    def mode(is_fake: bool) -> str:
+        return "fake" if is_fake else "live"
+    return {"services": {
+        "nessie": mode(s.nessie_fake),
+        "gmail": mode(s.gmail_fake),
+        "daytona": mode(s.daytona_fake),
+        "photon": mode(s.photon_fake),
+        "anthropic": "live" if s.anthropic_api_key else "fake",
+        "webhooks": "live" if (s.public_url and not s.nessie_fake) else ("local" if s.public_url else "polling"),
+    }, "otp_mode": s.otp_mode, "public_url": s.public_url or None}
+
+
 # --- public / dashboard API ------------------------------------------------
 
 @app.get("/engagements")

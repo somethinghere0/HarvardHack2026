@@ -34,7 +34,12 @@ def load_dotenv() -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, _, v = line.partition("=")
-        os.environ.setdefault(k.strip(), v.strip())
+        v = v.strip()
+        if v and v[0] in "\"'" and v[-1:] == v[0]:
+            v = v[1:-1]                       # strip matching quotes
+        elif " #" in v:
+            v = v.split(" #", 1)[0].rstrip()  # strip inline comment
+        os.environ.setdefault(k.strip(), v)
 
 
 def env(**over) -> dict:

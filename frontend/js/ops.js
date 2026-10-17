@@ -28,6 +28,18 @@ function engItem(e) {
   return btn;
 }
 
+async function renderStatus() {
+  try {
+    const st = await api("/status");
+    const strip = document.getElementById("status");
+    const chip = (name, mode) => h("span", { class: `svc ${mode === "live" ? "live" : mode === "fake" ? "fake" : "local"}` },
+      h("span", { class: "dot" }), `${name}: ${mode}`);
+    strip.replaceChildren(
+      ...Object.entries(st.services).map(([k, v]) => chip(k, v)),
+      h("span", { class: "svc fake" }, h("span", { class: "dot" }), `OTP: ${st.otp_mode}`));
+  } catch { /* status is best-effort */ }
+}
+
 async function refresh() {
   const { engagements } = await api("/engagements");
   countEl.textContent = `${engagements.length} engagement${engagements.length === 1 ? "" : "s"}`;
@@ -113,5 +125,6 @@ document.getElementById("sim").addEventListener("click", async (e) => {
   } catch (err) { alert(err.message); } finally { e.target.disabled = false; }
 });
 
+renderStatus();
 refresh().catch((e) => { panelEl.replaceChildren(h("div", { class: "empty-panel" }, "Can't reach the orchestrator at /api. Is it running?")); console.error(e); });
 setInterval(() => refresh().catch(() => {}), 3000);
