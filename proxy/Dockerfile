@@ -7,8 +7,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
-RUN useradd --system --uid 10001 proxy && mkdir /data && chown proxy /data
-USER proxy
+RUN useradd --system --uid 10001 nessieproxy && mkdir /data && chown nessieproxy /data
+USER nessieproxy
 VOLUME /data
 EXPOSE 8000
 
