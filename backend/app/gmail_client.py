@@ -74,18 +74,30 @@ class Gmail:
         M.login(self.s.gmail_address, self.s.gmail_app_password)
         return M
 
-    def list_recent(self, folder: str = "INBOX", limit: int = 25) -> list[dict]:
-        """Every recent message in a folder (read or unread), newest last, each with its stable Gmail
-        message id (X-GM-MSGID) so the firewall vets each email exactly once. app-password mode."""
+    def max_uid(self, folder: str = "INBOX") -> int:
+        """Highest message UID currently in the folder — the baseline for 'only new mail from now on'."""
+        with self._imap() as M:
+            typ, _ = M.select(folder)
+            if typ != "OK":
+                return 0
+            typ, data = M.uid("search", None, "ALL")
+            if typ != "OK" or not data or not data[0]:
+                return 0
+            return max(int(x) for x in data[0].split())
+
+    def list_recent(self, folder: str = "INBOX", limit: int = 25, since_uid: int = 0) -> list[dict]:
+        """Messages in a folder, each with its stable Gmail message id (X-GM-MSGID). With since_uid>0,
+        only messages newer than that UID (the firewall uses this to vet only incoming mail)."""
         out = []
         with self._imap() as M:
             typ, _ = M.select(folder)
             if typ != "OK":
                 return out
-            typ, data = M.uid("search", None, "ALL")
+            query = f"UID {since_uid + 1}:*" if since_uid else "ALL"
+            typ, data = M.uid("search", None, query)
             if typ != "OK" or not data or not data[0]:
                 return out
-            uids = data[0].split()[-limit:]
+            uids = [u for u in data[0].split() if int(u) > since_uid][-limit:]
             for uid in uids:
                 t, fetched = M.uid("fetch", uid, "(X-GM-MSGID BODY.PEEK[])")
                 if t != "OK" or not fetched:

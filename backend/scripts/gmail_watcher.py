@@ -41,20 +41,26 @@ def main() -> None:
     orch = os.environ.get("ORCHESTRATOR_URL", "http://127.0.0.1:8001").rstrip("/")
     gmail.ensure_label(s.gmail_quarantine_label)
     gmail.ensure_label(s.gmail_safe_label)
+    # Only vet mail that ARRIVES from now on: baseline at the current newest UID so existing inbox
+    # history is left alone. Set WATCH_BACKFILL=1 to process what's already there too.
+    backfill = os.environ.get("WATCH_BACKFILL", "0").strip().lower() in ("1", "true", "yes", "on")
+    since_uid = 0 if backfill else gmail.max_uid(s.gmail_source_label)
     print(f"Email firewall: {s.gmail_address} [{s.gmail_source_label}] -> {orch} "
-          f"(archive scams: {s.gmail_archive_scams})")
+          f"(archive scams: {s.gmail_archive_scams}; watching for NEW mail"
+          f"{' incl. backfill' if backfill else f' after uid {since_uid}'})")
     empty_polls = 0
     while True:
         try:
-            batch = gmail.list_recent(s.gmail_source_label, limit=WATCH_LIMIT)
-            if not batch:
-                empty_polls += 1
-                if empty_polls in (1, 6):  # hint once early, once after ~1 min of nothing
-                    print(f"[watcher] no mail seen in {s.gmail_source_label}. If this persists, enable "
-                          "IMAP in Gmail settings and check GMAIL_ADDRESS/GMAIL_APP_PASSWORD.")
-            else:
+            batch = gmail.list_recent(s.gmail_source_label, limit=WATCH_LIMIT, since_uid=since_uid)
+            if batch:
+                since_uid = max(since_uid, max(int(m["uid"]) for m in batch))
                 empty_polls = 0
-                print(f"[watcher] polled {len(batch)} message(s) in {s.gmail_source_label}")
+                print(f"[watcher] {len(batch)} new message(s) in {s.gmail_source_label}")
+            else:
+                empty_polls += 1
+                if empty_polls == 6:  # ~1 min of nothing
+                    print(f"[watcher] no new mail yet in {s.gmail_source_label}. If a message you sent "
+                          "isn't picked up, check IMAP is enabled and GMAIL_ADDRESS/GMAIL_APP_PASSWORD.")
             for m in batch:
                 if _is_our_mail(s, m):
                     continue
