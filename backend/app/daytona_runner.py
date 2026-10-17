@@ -19,7 +19,8 @@ _AGENT_PATH = os.path.join(os.path.dirname(__file__), "..", "agent", "bank_agent
 async def run(s, engagement_id: str) -> dict:
     s.require("daytona_api_key", "anthropic_api_key", "public_url")
     persona = _require_persona(s, engagement_id)
-    bank_url = s.public_url.rstrip("/") + "/"
+    # The agent opens the link the scam email pointed to; fall back to our own bank's sign-in.
+    bank_url = _detected_link(s, engagement_id) or (s.public_url.rstrip("/") + "/")
     mule = await _ensure_mule(s)
     db.add_event(s.db_path, engagement_id, "agent", "payee.added", {"payee_id": mule, "label": "external"})
     agent_env = {
@@ -81,6 +82,13 @@ def _run_sandbox(s, agent_env: dict) -> str:
             sandbox.delete()
         except Exception:
             pass
+
+
+def _detected_link(s, engagement_id: str) -> str | None:
+    for e in db.list_events(s.db_path, engagement_id):
+        if e["type"] == "portal.detected":
+            return e["data"].get("url")
+    return None
 
 
 def _require_persona(s, engagement_id: str) -> dict:

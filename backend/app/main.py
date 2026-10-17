@@ -9,7 +9,9 @@ import secrets
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 
-from . import classifier, db, daytona_runner, indicators, personas, responder
+import re
+
+from . import classifier, db, daytona_runner, indicators, personas
 from .config import settings
 from .gmail_client import Gmail
 from .nessie import NessieAdmin
@@ -209,20 +211,16 @@ async def vet_email(sender: str, subject: str, text: str, gmail_id: str | None =
         db.create_engagement(s.db_path, eid, "email", sender, subject)
         db.add_email(s.db_path, eid, "in", "scam", sender, s.gmail_address, subject, text)
         db.add_event(s.db_path, eid, "gmail", "email.scam_detected", verdict)
-        if verdict.get("portal_url"):
-            db.add_event(s.db_path, eid, "gmail", "portal.detected", {"url": verdict["portal_url"]})
-        # Only credential-phishing is worth the full decoy-login honeypot; other scams are quarantined
-        # and shown, without burning a sandbox.
+        # The link the scammer wants the victim to click (what the agent will open). Fall back to our
+        # own bank's sign-in if the email didn't carry a usable URL.
+        link = verdict.get("portal_url") or _first_url(text) or (s.public_url + "/" if s.public_url else "")
+        if link:
+            db.add_event(s.db_path, eid, "gmail", "portal.detected", {"url": link})
+        # Credential-phishing gets the full decoy run: the agent plays the victim — opens the link,
+        # signs in with the decoy account, enters the OTP, and lets the account be drained. No reply
+        # is ever sent to the scammer.
         if verdict.get("vector") == "credential_phishing":
-            persona = await personas.create_persona(s, eid)
-            reply = responder.draft_reply(s, verdict.get("vector"),
-                                          {"first_name": persona_firstname(persona)}, f"{subject}\n{text}")
-            try:
-                gmail.send(sender, f"Re: {subject}", reply)
-                db.add_email(s.db_path, eid, "out", "reply", persona["email"], sender, f"Re: {subject}", reply)
-                db.add_event(s.db_path, eid, "agent", "reply.sent", {"vector": verdict.get("vector")})
-            except Exception as e:
-                db.add_event(s.db_path, eid, "agent", "reply.failed", {"error": str(e)})
+            await personas.create_persona(s, eid)
             asyncio.create_task(_run_agent_task(eid))
         db.update_engagement(s.db_path, eid, status="baited",
                              summary=f"{verdict.get('vector')} ({int(verdict.get('confidence', 0) * 100)}% conf.)")
@@ -371,6 +369,11 @@ async def nessie_webhook(request: Request):
 def _safe_persona(p: dict) -> dict:
     # The decoy credentials are intentionally returned here: this API is server-side/dashboard only.
     return p
+
+
+def _first_url(text: str) -> str:
+    m = re.search(r"https?://[^\s<>\")]+", text or "")
+    return m.group(0).rstrip(".,);]") if m else ""
 
 
 def persona_firstname(persona: dict) -> str:
