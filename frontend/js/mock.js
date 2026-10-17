@@ -64,6 +64,7 @@ export const mock = {
     s.users[username] = { password: body.password, customerId };
     startSession(s, username);
     save(s);
+    return { status: "ok" };
   },
 
   async login(username, password) {
@@ -73,6 +74,12 @@ export const mock = {
     if (!u || u.password !== password) throw new ApiError(401, "Invalid username or password");
     startSession(s, username.toLowerCase());
     save(s);
+    return { status: "ok" }; // demo mode has no second factor
+  },
+
+  // Interface parity with live; demo never reaches the OTP step.
+  async verifyOtp() {
+    return { status: "ok" };
   },
 
   async logout() {

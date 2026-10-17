@@ -38,6 +38,24 @@ class NessieClient:
         except httpx.HTTPError:
             pass  # best effort
 
+    _owner_cache: dict[str, str] = {}
+
+    async def account_owner(self, account_id: str) -> str | None:
+        """Customer id that owns an account, cached. Used to keep a session scoped to its own data."""
+        if account_id in self._owner_cache:
+            return self._owner_cache[account_id]
+        try:
+            r = await self._http.get(f"/accounts/{account_id}/customer")
+        except httpx.HTTPError:
+            return None
+        if r.status_code >= 400:
+            return None
+        d = r.json()
+        owner = d.get("id") or d.get("_id")
+        if owner:
+            self._owner_cache[account_id] = owner
+        return owner
+
     async def forward(self, method: str, path: str, query: bytes, headers, body: bytes) -> httpx.Response:
         fwd = {k: v for k, v in headers.items() if k.lower() not in _DROP_REQUEST}
         url = httpx.URL(path=path, query=query)

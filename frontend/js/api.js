@@ -48,12 +48,17 @@ const unwrap = (d) => d?.objectCreated ?? d;
 const asList = (d) => (Array.isArray(d) ? d : d?.data ?? d?.items ?? d?.results ?? []);
 const today = () => new Date().toISOString().slice(0, 10);
 
+// Nessie v2 stores money as integer cents (balance_cents / amount_cents); the mock uses dollars.
+// Accept either so one normalizer serves both backends.
+const toDollars = (cents, dollars) =>
+  cents != null && cents !== "" ? Number(cents) / 100 : Number(dollars ?? 0);
+
 export function normAccount(a) {
   return {
     id: a.id ?? a._id,
     type: a.type || "Checking",
     nickname: a.nickname || a.type || "Account",
-    balance: Number(a.balance ?? 0),
+    balance: toDollars(a.balance_cents, a.balance),
     rewards: Number(a.rewards ?? 0),
     accountNumber: a.account_number ?? a.accountNumber ?? "",
     customerId: a.customer_id ?? a.customerId,
@@ -66,7 +71,7 @@ export function normTxn(t, kind) {
     kind,
     date: t.transaction_date ?? t.created_at ?? t.date ?? "",
     status: t.status || "pending",
-    amount: Number(t.amount ?? 0),
+    amount: toDollars(t.amount_cents, t.amount),
     description: t.description || "",
     payerId: t.payer_id ?? t.payerId,
     payeeId: t.payee_id ?? t.payeeId,
@@ -101,13 +106,23 @@ export const live = {
   async signup(body) {
     const r = await request("POST", "/auth/signup", body);
     session.set({ ...r, username: body.username.toLowerCase(), mode: "live" });
+    return { status: "ok" };
   },
 
+  // Returns {status:"otp", challengeId, username} when a second factor is required, else {status:"ok"}.
   async login(username, password) {
     const r = await request("POST", "/auth/login", { username, password });
+    if (r?.otp_required) return { status: "otp", challengeId: r.challenge_id, username: username.toLowerCase() };
     session.set({ ...r, username: username.toLowerCase(), mode: "live" });
     const me = await request("GET", "/auth/me"); // login doesn't return the customer id
     session.update({ customer_id: me.customer_id, username: me.username });
+    return { status: "ok" };
+  },
+
+  async verifyOtp(challengeId, code, username) {
+    const r = await request("POST", "/auth/verify-otp", { challenge_id: challengeId, code });
+    session.set({ ...r, username, mode: "live" });
+    return { status: "ok" };
   },
 
   async logout() {
@@ -132,7 +147,8 @@ export const live = {
   },
 
   async openAccount({ type, nickname }) {
-    const r = await request("POST", `/customers/${customerId()}/accounts`, { type, nickname, rewards: 0, balance: 0 });
+    const r = await request("POST", `/customers/${customerId()}/accounts`,
+      { type, nickname, rewards: 0, balance_cents: 0 });
     return normAccount(unwrap(r));
   },
 
@@ -150,15 +166,17 @@ export const live = {
 
   async transfer({ fromId, toId, amount, description }) {
     const r = await request("POST", `/accounts/${encodeURIComponent(fromId)}/transfers`, {
-      medium: "balance", payee_id: toId, amount, transaction_date: today(), description,
+      medium: "balance", payee_id: toId, amount_cents: toCents(amount), description,
     });
     return normTxn(unwrap(r) || {}, "transfer");
   },
 
   async deposit({ accountId, amount, description }) {
     const r = await request("POST", `/accounts/${encodeURIComponent(accountId)}/deposits`, {
-      medium: "balance", amount, transaction_date: today(), description,
+      medium: "balance", amount_cents: toCents(amount), description,
     });
     return normTxn(unwrap(r) || {}, "deposit");
   },
 };
+
+const toCents = (dollars) => Math.round(Number(dollars) * 100);

@@ -82,13 +82,37 @@ function loginView() {
     e.preventDefault();
     const { username, password } = formData(form);
     await busy(form, err, async () => {
-      await api().login(username, password);
+      const res = await api().login(username, password);
+      if (res?.status === "otp") return otpView(res);
       go("dashboard");
     });
   }
 
   render(...authShell("Welcome back", "Sign in to your accounts", form,
     h("p", { class: "auth-alt" }, "New here? ", h("a", { href: "#", onClick: nav("signup") }, "Create an account"))));
+}
+
+function otpView(ctx) {
+  const err = h("div");
+  const form = h("form", { onSubmit: onSubmit },
+    field("Verification code",
+      h("input", { name: "code", inputmode: "numeric", autocomplete: "one-time-code", pattern: "[0-9]{6}",
+        placeholder: "123456", required: true, autofocus: true }),
+      "We sent a 6-digit code to the email on file."),
+    err,
+    h("button", { class: "btn btn-primary btn-block", type: "submit" }, "Verify & sign in"));
+
+  async function onSubmit(e) {
+    e.preventDefault();
+    const { code } = formData(form);
+    await busy(form, err, async () => {
+      await api().verifyOtp(ctx.challengeId, code.trim(), ctx.username);
+      go("dashboard");
+    });
+  }
+
+  render(...authShell("Enter your code", "Two-step verification", form,
+    h("p", { class: "auth-alt" }, "Wrong account? ", h("a", { href: "#", onClick: nav("login") }, "Start over"))));
 }
 
 function signupView() {

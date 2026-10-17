@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import secrets
 import sqlite3
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
@@ -35,6 +37,24 @@ class LoginBody(BaseModel):
     password: str = Field(max_length=128)
 
 
+class OtpBody(BaseModel):
+    challenge_id: str = Field(max_length=64)
+    code: str = Field(min_length=4, max_length=12)
+
+
+async def _orchestrator_post(request: Request, path: str, body: dict) -> None:
+    """Best-effort internal call to the orchestrator (OTP email, login telemetry)."""
+    s = request.app.state.settings
+    if not s.orchestrator_url:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            await c.post(f"{s.orchestrator_url}{path}", json=body,
+                         headers={"X-Internal-Secret": s.internal_secret})
+    except httpx.HTTPError:
+        pass
+
+
 def _issue(request: Request, user_id: int) -> dict:
     s = request.app.state.settings
     token = new_token()
@@ -63,11 +83,36 @@ async def signup(body: SignupBody, request: Request):
 
 
 @router.post("/login")
-def login(body: LoginBody, request: Request):
-    user = db.get_user(request.app.state.settings.db_path, body.username.lower())
+async def login(body: LoginBody, request: Request):
+    s = request.app.state.settings
+    user = db.get_user(s.db_path, body.username.lower())
     if not verify_password(user["password_hash"] if user else None, body.password):
         raise HTTPException(401, "Invalid username or password", headers={"WWW-Authenticate": "Bearer"})
-    return _issue(request, user["id"])
+    if not s.otp_required:
+        return _issue(request, user["id"])
+    # Second factor: issue a code, store only its hash, and have the orchestrator deliver it by email.
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    challenge_id = secrets.token_urlsafe(18)
+    db.create_challenge(s.db_path, challenge_id, user["id"], hash_token(code), s.otp_ttl_seconds)
+    await _orchestrator_post(request, "/internal/send-otp",
+                             {"username": user["username"], "challenge_id": challenge_id, "code": code})
+    return {"otp_required": True, "challenge_id": challenge_id}
+
+
+@router.post("/verify-otp")
+async def verify_otp(body: OtpBody, request: Request):
+    s = request.app.state.settings
+    ch = db.get_challenge(s.db_path, body.challenge_id)
+    if not ch or hash_token(body.code) != ch["code_hash"]:
+        raise HTTPException(401, "Invalid or expired code")
+    db.consume_challenge(s.db_path, body.challenge_id)
+    user = db.get_user_by_id(s.db_path, ch["user_id"])
+    ip = request.client.host if request.client else None
+    await _orchestrator_post(request, "/internal/event", {
+        "username": user["username"], "type": "session.login", "source": "proxy",
+        "data": {"ip": ip, "ua": request.headers.get("user-agent", "")},
+    })
+    return {**_issue(request, user["id"]), "customer_id": user["nessie_customer_id"]}
 
 
 @router.post("/logout", status_code=204, dependencies=[Depends(require_user)])

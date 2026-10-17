@@ -18,6 +18,14 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     expires_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS otp_challenges (
+    challenge_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    consumed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -81,3 +89,33 @@ def get_session_user(path: str, token_hash: str):
 def delete_session(path: str, token_hash: str) -> None:
     with connect(path) as c:
         c.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+
+
+def create_challenge(path: str, challenge_id: str, user_id: int, code_hash: str, ttl_seconds: int) -> datetime:
+    expires = _now() + timedelta(seconds=ttl_seconds)
+    with connect(path) as c:
+        c.execute("DELETE FROM otp_challenges WHERE expires_at < ?", (_now().isoformat(),))
+        c.execute(
+            "INSERT INTO otp_challenges (challenge_id, user_id, code_hash, expires_at, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (challenge_id, user_id, code_hash, expires.isoformat(), _now().isoformat()),
+        )
+    return expires
+
+
+def get_challenge(path: str, challenge_id: str):
+    with connect(path) as c:
+        return c.execute(
+            "SELECT * FROM otp_challenges WHERE challenge_id = ? AND consumed = 0 AND expires_at > ?",
+            (challenge_id, _now().isoformat()),
+        ).fetchone()
+
+
+def consume_challenge(path: str, challenge_id: str) -> None:
+    with connect(path) as c:
+        c.execute("UPDATE otp_challenges SET consumed = 1 WHERE challenge_id = ?", (challenge_id,))
+
+
+def get_user_by_id(path: str, user_id: int):
+    with connect(path) as c:
+        return c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()

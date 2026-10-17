@@ -1,3 +1,12 @@
+# Core (always needed)
 fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
 httpx>=0.27,<1
+
+# Live integrations (only used when the matching FAKE flag is 0; imported lazily otherwise)
+anthropic>=0.40,<1
+faker>=30,<40
+google-api-python-client>=2.140,<3
+google-auth>=2.34,<3
+google-auth-oauthlib>=1.2,<2
+daytona>=0.100,<1

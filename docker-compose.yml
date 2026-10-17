@@ -1,15 +1,22 @@
 services:
   proxy:
     build: ./proxy
-    env_file: ./proxy/.env
+    env_file: ./.env
+    environment:
+      DB_PATH: /data/proxy.db
+      ORCHESTRATOR_URL: http://backend:8001
     volumes:
       - proxy-data:/data
     restart: unless-stopped
 
   backend:
     build: ./backend
+    env_file: ./.env
     environment:
+      ORCH_DB_PATH: /data/orchestrator.db
       PROXY_URL: http://proxy:8000
+    volumes:
+      - orch-data:/data
     depends_on:
       proxy:
         condition: service_healthy
@@ -21,12 +28,22 @@ services:
     build: ./frontend
     depends_on:
       backend:
-        condition: service_started
+        condition: service_healthy
       proxy:
         condition: service_healthy
     ports:
       - "3000:80"
     restart: unless-stopped
 
+  # Public URL for Nessie webhooks + the scammer-facing bank. Set CLOUDFLARE_TUNNEL_TOKEN in .env to
+  # enable, then set PUBLIC_URL to the tunnel's hostname. (For a quick tunnel with no account, run
+  # `cloudflared tunnel --url http://localhost:3000` on the host instead and skip this service.)
+  # tunnel:
+  #   image: cloudflare/cloudflared:latest
+  #   command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+  #   depends_on: [frontend]
+  #   restart: unless-stopped
+
 volumes:
   proxy-data:
+  orch-data:
