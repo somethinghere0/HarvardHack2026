@@ -1,7 +1,10 @@
 to,cc,subject,body
-recipient@example.com,,Urgent action required,"Dear Mr ____,
+recipient@example.com,,Urgent action required,"Dear Mr. Ty,
 
-This is a pre-written email.
+We're having some trouble with your current account information. We have attached
+a link before to check and verify your information.
+
+{link}
 
 Best regards,
-Your Name"
+Scammer"
