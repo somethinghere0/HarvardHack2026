@@ -27,18 +27,14 @@ def _is_public(url: str) -> bool:
 @app.on_event("startup")
 async def startup():
     db.init_db(s.db_path)
+    s.require("nessie_api_key")
     app.state.webhook_id = None
     app.state.webhook_secret = ""
     app.state.poller = None
-    app.state.nessie = NessieAdmin(s.nessie_base_url, s.nessie_api_key or "fake") \
-        if (s.public_url or not s.nessie_fake) else None
-    if not app.state.nessie:
-        return
+    app.state.nessie = NessieAdmin(s.nessie_base_url, s.nessie_api_key)
 
-    # Webhooks only work if the callback is reachable from wherever Nessie runs: the bundled fake can
-    # reach localhost, but real Nessie needs a public (tunnel) URL. Otherwise poll the /events feed.
-    webhook_ok = s.public_url and (s.nessie_fake or _is_public(s.public_url))
-    if webhook_ok:
+    # A public (tunnel) URL lets Nessie push webhooks here; otherwise poll the /events feed.
+    if s.public_url and _is_public(s.public_url):
         try:
             wh = await app.state.nessie.create_webhook(
                 f"{s.public_url}/api/webhooks/nessie",
@@ -49,9 +45,8 @@ async def startup():
             return
         except Exception as e:
             print(f"[orchestrator] webhook registration failed ({e}); falling back to polling")
-    if not s.nessie_fake:
-        app.state.poller = asyncio.create_task(_poll_events())
-        print("[orchestrator] polling GET /events for money-movement (no public webhook URL)")
+    app.state.poller = asyncio.create_task(_poll_events())
+    print("[orchestrator] polling GET /events for money-movement")
 
 
 @app.on_event("shutdown")
@@ -65,19 +60,20 @@ async def shutdown():
 
 
 async def _poll_events(interval: float = 2.0):
-    """Live-mode fallback when there's no public webhook URL: resume the /events feed from the latest
-    cursor and ingest money-movement events the same way the webhook receiver does."""
-    last = 0
-    try:  # start at the current tip so we don't replay the whole tenant's history
-        tip = await app.state.nessie.get_events(after=0, limit=500)
-        last = max((_seq(e) for e in tip), default=0)
+    """Resume Nessie's /events feed from its cursor and ingest money-movement events the same way the
+    webhook receiver does. Starts at the current tip so it doesn't replay the whole tenant history."""
+    cursor = None
+    try:
+        _, cursor = await app.state.nessie.get_events(limit=1)
     except Exception:
         pass
     while True:
         try:
-            for ev in await app.state.nessie.get_events(after=last, limit=200):
-                last = max(last, _seq(ev))
+            items, nxt = await app.state.nessie.get_events(after=cursor, limit=200)
+            for ev in items:
                 _ingest_nessie_event(ev)
+            if nxt is not None:
+                cursor = nxt
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -85,32 +81,40 @@ async def _poll_events(interval: float = 2.0):
         await asyncio.sleep(interval)
 
 
-def _seq(ev: dict) -> int:
-    v = ev.get("seq") or ev.get("id") or 0
-    return v if isinstance(v, int) else 0
-
-
-# Dedupe ingested events by their Nessie id, so webhook retries or a non-incrementing /events cursor
-# can't double-count a transfer (which would spam the timeline and inflate indicators).
+# Dedupe ingested events by their Nessie id, so webhook retries or a replayed cursor can't
+# double-count a transfer (which would spam the timeline and inflate indicators).
 _seen_events: set = set()
 
 
 def _ingest_nessie_event(env: dict) -> None:
-    ev_id = env.get("id") or env.get("seq")
+    """Map a Nessie v2 event envelope onto the timeline. Real shape:
+    {id, seq, type:'transaction.*', account_id, data:{transaction:{kind, amount_cents, payer_id,
+    payee_id, status}}}. Normalizes to '<kind>.<status/created>' so the indicator engine reads it."""
+    # Dedupe by transaction id when present, so the created + settled events for one transaction
+    # (different event ids, same tx_id) are counted once.
+    ev_id = env.get("tx_id") or env.get("id") or env.get("seq")
     if ev_id is not None:
         if ev_id in _seen_events:
             return
         _seen_events.add(ev_id)
-        if len(_seen_events) > 10000:  # bound memory for long-running sessions
+        if len(_seen_events) > 10000:
             _seen_events.clear()
-    data = env.get("data", env)
-    account_id = env.get("account_id") or data.get("payer_id") or data.get("payee_id")
+    data = env.get("data", env) or {}
+    txn = data.get("transaction", data)
+    kind = (txn.get("kind") or "").lower()
+    account_id = env.get("account_id") or txn.get("payer_id") or txn.get("payee_id")
     eid = None
-    for cand in (account_id, data.get("payer_id"), data.get("payee_id")):
+    for cand in (account_id, txn.get("payer_id"), txn.get("payee_id")):
         eid = eid or (db.find_engagement_by_account(s.db_path, cand) if cand else None)
-    if eid:
-        db.add_event(s.db_path, eid, "nessie", env.get("type", "event"), {**data, "account_id": account_id})
-        indicators.recompute_and_store(s.db_path, eid)
+    if not eid:
+        return
+    etype = f"{kind}.created" if kind in ("transfer", "deposit", "withdrawal") else env.get("type", "event")
+    db.add_event(s.db_path, eid, "nessie", etype, {
+        "account_id": account_id, "kind": kind, "status": txn.get("status"),
+        "amount_cents": txn.get("amount_cents"), "payer_id": txn.get("payer_id"),
+        "payee_id": txn.get("payee_id"), "description": txn.get("description", ""),
+    })
+    indicators.recompute_and_store(s.db_path, eid)
 
 
 @app.get("/health")
@@ -120,17 +124,16 @@ def health():
 
 @app.get("/status")
 def status():
-    """Which services are live vs. faked — powers the dashboard's setup strip."""
-    def mode(is_fake: bool) -> str:
-        return "fake" if is_fake else "live"
+    """Which integrations are configured — powers the dashboard's setup strip. 'missing' means the
+    feature can't run until its key/URL is set."""
+    on = lambda ok, label="live": label if ok else "missing"  # noqa: E731
     return {"services": {
-        "nessie": mode(s.nessie_fake),
-        "gmail": gmail.mode,
-        "daytona": mode(s.daytona_fake),
-        "photon": mode(s.photon_fake),
-        "anthropic": "live" if s.anthropic_api_key else "fake",
-        "webhooks": "live" if (s.public_url and not s.nessie_fake) else ("local" if s.public_url else "polling"),
-    }, "otp_mode": s.otp_mode, "public_url": s.public_url or None}
+        "nessie": on(bool(s.nessie_api_key)),
+        "gmail": gmail.mode if (s.gmail_app_password or s.gmail_address) else "missing",
+        "daytona": on(bool(s.daytona_api_key)),
+        "anthropic": on(bool(s.anthropic_api_key)),
+        "webhooks": "live" if (s.public_url and _is_public(s.public_url)) else "polling",
+    }, "public_url": s.public_url or None}
 
 
 # --- public / dashboard API ------------------------------------------------
@@ -193,12 +196,18 @@ async def sim_inbound_email(body: dict):
     db.create_engagement(s.db_path, eid, "email", sender, subject)
     db.add_email(s.db_path, eid, "in", "scam", sender, s.gmail_address, subject, text)
     db.add_event(s.db_path, eid, "gmail", "email.scam_detected", verdict)
+    # If the email named a portal URL, record it so the agent targets the real phishing site.
+    if verdict.get("portal_url"):
+        db.add_event(s.db_path, eid, "gmail", "portal.detected", {"url": verdict["portal_url"]})
     persona = await personas.create_persona(s, eid)
     reply = responder.draft_reply(s, verdict.get("vector", "unknown"),
                                   {"first_name": persona_firstname(persona)}, f"{subject}\n{text}")
-    gmail.send(sender, f"Re: {subject}", reply)
-    db.add_email(s.db_path, eid, "out", "reply", persona["email"], sender, f"Re: {subject}", reply)
-    db.add_event(s.db_path, eid, "agent", "reply.sent", {"vector": verdict.get("vector")})
+    try:  # replying needs Gmail; don't let a mail hiccup abort the engagement
+        gmail.send(sender, f"Re: {subject}", reply)
+        db.add_email(s.db_path, eid, "out", "reply", persona["email"], sender, f"Re: {subject}", reply)
+        db.add_event(s.db_path, eid, "agent", "reply.sent", {"vector": verdict.get("vector")})
+    except Exception as e:
+        db.add_event(s.db_path, eid, "agent", "reply.failed", {"error": str(e)})
     db.update_engagement(s.db_path, eid, status="baited",
                          summary=f"{verdict.get('vector')} ({int(verdict.get('confidence',0)*100)}% conf.)")
     return {"opened": True, "engagement_id": eid, "classification": verdict,
@@ -233,15 +242,31 @@ async def internal_send_otp(body: dict, x_internal_secret: str = Header(None)):
     from datetime import datetime, timedelta, timezone
     expires = (datetime.now(timezone.utc) + timedelta(seconds=s.otp_ttl_seconds)).isoformat()
     db.create_otp(s.db_path, challenge_id, persona["id"], code, expires)
-    if s.otp_mode == "email":
-        subject = "Your Honeybank verification code"
-        text = f"Your Honeybank verification code is {code}. It expires in {s.otp_ttl_seconds//60} minutes."
+    # Email the persona inbox (best-effort — the agent reads the code from /internal/otp regardless).
+    subject = "Your Honeybank verification code"
+    text = f"Your Honeybank verification code is {code}. It expires in {s.otp_ttl_seconds // 60} minutes."
+    emailed = False
+    try:
         gmail.send(persona["email"], subject, text)
         db.add_email(s.db_path, persona["engagement_id"], "out", "otp", s.gmail_address,
                      persona["email"], subject, text)
+        emailed = True
+    except Exception as e:
+        print(f"[orchestrator] OTP email failed ({e}); code still retrievable via /internal/otp")
     db.add_event(s.db_path, persona["engagement_id"], "system", "otp.sent",
-                 {"mode": s.otp_mode, "to": persona["email"]})
+                 {"emailed": emailed, "to": persona["email"]})
     return {"ok": True}
+
+
+@app.get("/internal/otp/{persona_id}")
+def internal_get_otp(persona_id: str, x_internal_secret: str = Header(None)):
+    """The decoy agent's "inbox": the latest unconsumed OTP for its persona. Consumed on read."""
+    _check_internal(x_internal_secret)
+    otp = db.latest_otp_for_persona(s.db_path, persona_id)
+    if not otp:
+        raise HTTPException(404, "no code yet")
+    db.consume_otp(s.db_path, otp["challenge_id"])
+    return {"code": otp["code"]}
 
 
 @app.post("/internal/event")

@@ -32,7 +32,8 @@ async function renderStatus() {
   try {
     const st = await api("/status");
     const strip = document.getElementById("status");
-    const cls = (m) => (m === "fake" ? "fake" : m === "local" || m === "polling" ? "local" : "live");
+    const cls = (m) => (["live", "app_password", "oauth"].includes(m) ? "live"
+      : m === "polling" || m === "local" ? "local" : "fake");  // 'missing' shows grey
     const chip = (name, mode) => h("span", { class: `svc ${cls(mode)}` },
       h("span", { class: "dot" }), `${name}: ${mode}`);
     strip.replaceChildren(

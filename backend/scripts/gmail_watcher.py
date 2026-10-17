@@ -23,8 +23,6 @@ POLL_SECONDS = int(os.environ.get("WATCH_POLL_SECONDS", "10"))
 
 def main() -> None:
     s = settings()
-    if s.gmail_fake:
-        raise SystemExit("GMAIL_FAKE is on; the watcher is only for real Gmail. Use /api/sim/* for demos.")
     gmail = Gmail(s)
     orch = os.environ.get("ORCHESTRATOR_PUBLIC_URL", "http://127.0.0.1:8001")
     print(f"Watching {s.gmail_address} every {POLL_SECONDS}s -> {orch}")

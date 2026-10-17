@@ -70,8 +70,11 @@ def compute(path: str, engagement_id: str) -> dict:
 
     if sub_threshold >= STRUCTURING_MIN_COUNT:
         tags.add("structuring")
-    if any(e["type"] == "account.balance_changed" and int(e["data"].get("balance_cents", 1)) <= 0
-           for e in events):
+    drained = any(e["type"] == "account.balance_changed" and int(e["data"].get("balance_cents", 1)) <= 0
+                  for e in events)
+    drained = drained or any(e["type"] in ("scammer.drain", "engagement.drained")
+                             and int(e["data"].get("moved_cents", 0)) > 0 for e in events)
+    if drained:
         tags.add("full_drain")
     if any(e["type"] in ("profile.updated", "contact.changed") for e in events):
         tags.add("contact_change")

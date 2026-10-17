@@ -47,7 +47,7 @@ class ProxyClient:
                             headers={"Authorization": f"Bearer {token}"})
             r.raise_for_status()
             d = r.json()
-            return d if isinstance(d, list) else d.get("data", [])
+            return d if isinstance(d, list) else (d.get("items") or d.get("data") or [])
 
     async def open_account(self, token: str, customer_id: str, account: dict) -> dict:
         async with httpx.AsyncClient(timeout=30) as c:

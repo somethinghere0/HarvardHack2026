@@ -57,7 +57,7 @@ export function normAccount(a) {
     id: a.id ?? a._id,
     type: a.type || "Checking",
     nickname: a.nickname || a.type || "Account",
-    balance: toDollars(a.balance_cents, a.balance),
+    balance: toDollars(a.available_cents ?? a.balance_cents, a.balance),
     rewards: Number(a.rewards ?? 0),
     accountNumber: a.account_number ?? a.accountNumber ?? "",
     customerId: a.customer_id ?? a.customerId,

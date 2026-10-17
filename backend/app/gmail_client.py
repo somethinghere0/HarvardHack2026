@@ -28,19 +28,12 @@ _SMTP_HOST = "smtp.gmail.com"
 class Gmail:
     def __init__(self, s):
         self.s = s
-        if s.gmail_fake:
-            self.mode = "fake"
-        elif s.gmail_app_password:
-            self.mode = "app_password"
-        else:
-            self.mode = "oauth"
+        self.mode = "app_password" if s.gmail_app_password else "oauth"
         self._svc = None
 
     # ---- send ----------------------------------------------------------------
 
     def send(self, to: str, subject: str, body: str) -> dict:
-        if self.mode == "fake":
-            return {"fake": True, "to": to, "subject": subject}
         msg = MIMEText(body)
         msg["To"], msg["From"], msg["Subject"] = to, self.s.gmail_address, subject
         if self.mode == "app_password":
@@ -54,9 +47,7 @@ class Gmail:
     # ---- read (watcher) ------------------------------------------------------
 
     def list_unread(self) -> list[dict]:
-        """[{id, thread_id, sender, recipient, subject, body}] for unread inbox mail. Not FAKE mode."""
-        if self.mode == "fake":
-            return []
+        """[{id, thread_id, sender, recipient, subject, body}] for unread inbox mail."""
         if self.mode == "app_password":
             return self._imap_unread()
         svc = self._service()
@@ -68,8 +59,6 @@ class Gmail:
         return out
 
     def mark_read(self, message_id: str) -> None:
-        if self.mode == "fake":
-            return
         if self.mode == "app_password":
             with self._imap() as M:
                 M.select("INBOX")

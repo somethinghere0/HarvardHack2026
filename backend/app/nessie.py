@@ -1,6 +1,6 @@
 """Thin Nessie v2 client for the orchestrator's admin-level needs: registering the notify webhook
-and (as a fallback) polling the resumable /events feed. Persona data is created through the proxy,
-not here, so this file is small. Base URL points at the real API or the bundled fake upstream."""
+and (as a fallback) polling the resumable /events feed. Persona data is created through the proxy, not here, so this file is
+small."""
 from __future__ import annotations
 
 import httpx
@@ -35,7 +35,8 @@ class NessieAdmin:
         await self._http.post(f"/webhooks/{webhook_id}/ping")
 
     async def get_events(self, after: int | str | None = None, limit: int = 200,
-                         types: list[str] | None = None) -> list[dict]:
+                         types: list[str] | None = None) -> tuple[list[dict], int | str | None]:
+        """Nessie v2 returns {"items":[...], "next_cursor":N}. Returns (items, next_cursor)."""
         params: dict = {"limit": min(limit, 500)}
         if after is not None:
             params["after"] = after
@@ -43,5 +44,8 @@ class NessieAdmin:
             params["types"] = ",".join(types)
         r = await self._http.get("/events", params=params)
         r.raise_for_status()
-        data = r.json()
-        return data if isinstance(data, list) else data.get("data", data.get("events", []))
+        d = r.json()
+        if isinstance(d, list):
+            return d, None
+        items = d.get("items") or d.get("data") or d.get("events") or []
+        return items, d.get("next_cursor")

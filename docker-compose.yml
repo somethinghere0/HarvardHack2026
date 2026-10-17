@@ -5,6 +5,8 @@ services:
     environment:
       DB_PATH: /data/proxy.db
       ORCHESTRATOR_URL: http://backend:8001
+      OTP_REQUIRED: "1"
+      ENFORCE_CUSTOMER_SCOPE: "1"
     volumes:
       - proxy-data:/data
     restart: unless-stopped
@@ -24,6 +26,17 @@ services:
       - "8001:8001"
     restart: unless-stopped
 
+  portal:
+    build: ./portal
+    env_file: ./.env
+    environment:
+      PROXY_URL: http://proxy:8000
+      ORCHESTRATOR_URL: http://backend:8001
+    depends_on:
+      proxy:
+        condition: service_healthy
+    restart: unless-stopped
+
   frontend:
     build: ./frontend
     depends_on:
@@ -31,13 +44,14 @@ services:
         condition: service_healthy
       proxy:
         condition: service_healthy
+      portal:
+        condition: service_healthy
     ports:
       - "3000:80"
     restart: unless-stopped
 
-  # Public URL for Nessie webhooks + the scammer-facing bank. Set CLOUDFLARE_TUNNEL_TOKEN in .env to
-  # enable, then set PUBLIC_URL to the tunnel's hostname. (For a quick tunnel with no account, run
-  # `cloudflared tunnel --url http://localhost:3000` on the host instead and skip this service.)
+  # Public URL for Nessie webhooks, the scammer-facing bank, and the sandboxed agent. Set
+  # CLOUDFLARE_TUNNEL_TOKEN in .env and PUBLIC_URL to the tunnel hostname, then uncomment.
   # tunnel:
   #   image: cloudflare/cloudflared:latest
   #   command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}

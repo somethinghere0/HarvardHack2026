@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 FRONTEND = os.environ.get("FRONTEND_DIR", "frontend")
 PROXY_URL = os.environ.get("DEV_PROXY_URL", "http://127.0.0.1:8000")
 ORCH_URL = os.environ.get("DEV_ORCH_URL", "http://127.0.0.1:8001")
+PORTAL_URL = os.environ.get("DEV_PORTAL_URL", "http://127.0.0.1:8080")
 _METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
 
 app = FastAPI()
@@ -37,6 +38,17 @@ async def bank_api(path: str, request: Request):
 @app.api_route("/api/{path:path}", methods=_METHODS)
 async def api(path: str, request: Request):
     return await _forward(ORCH_URL, path, request)
+
+
+# The decoy portal is reachable at /portal and /portal/* (its forms post to /portal/login, /portal/otp).
+@app.api_route("/portal", methods=_METHODS)
+async def portal_root(request: Request):
+    return await _forward(PORTAL_URL, "portal", request)
+
+
+@app.api_route("/portal/{path:path}", methods=_METHODS)
+async def portal(path: str, request: Request):
+    return await _forward(PORTAL_URL, f"portal/{path}", request)
 
 
 app.mount("/", StaticFiles(directory=FRONTEND, html=True), name="static")
