@@ -19,32 +19,86 @@ app = FastAPI(title="Honeybank orchestrator")
 gmail = Gmail(s)
 
 
+def _is_public(url: str) -> bool:
+    """A URL a remote service (real Nessie) could actually reach — i.e. not localhost."""
+    return bool(url) and not any(h in url for h in ("localhost", "127.0.0.1", "::1", "0.0.0.0"))
+
+
 @app.on_event("startup")
 async def startup():
     db.init_db(s.db_path)
+    app.state.webhook_id = None
+    app.state.webhook_secret = ""
+    app.state.poller = None
     app.state.nessie = NessieAdmin(s.nessie_base_url, s.nessie_api_key or "fake") \
         if (s.public_url or not s.nessie_fake) else None
-    app.state.webhook_id = None
-    if app.state.nessie and s.public_url:
+    if not app.state.nessie:
+        return
+
+    # Webhooks only work if the callback is reachable from wherever Nessie runs: the bundled fake can
+    # reach localhost, but real Nessie needs a public (tunnel) URL. Otherwise poll the /events feed.
+    webhook_ok = s.public_url and (s.nessie_fake or _is_public(s.public_url))
+    if webhook_ok:
         try:
             wh = await app.state.nessie.create_webhook(
                 f"{s.public_url}/api/webhooks/nessie",
                 events=["transaction.completed", "transfer.created", "account.balance_changed"])
             app.state.webhook_id = wh.get("id")
             app.state.webhook_secret = wh.get("secret", "")
-        except Exception as e:  # tunnel/key not ready: fall back to no webhook (sim still works)
-            app.state.webhook_secret = ""
-            print(f"[orchestrator] webhook registration skipped: {e}")
-    else:
-        app.state.webhook_secret = ""
+            print(f"[orchestrator] webhook registered -> {s.public_url}/api/webhooks/nessie")
+            return
+        except Exception as e:
+            print(f"[orchestrator] webhook registration failed ({e}); falling back to polling")
+    if not s.nessie_fake:
+        app.state.poller = asyncio.create_task(_poll_events())
+        print("[orchestrator] polling GET /events for money-movement (no public webhook URL)")
 
 
 @app.on_event("shutdown")
 async def shutdown():
+    if app.state.poller:
+        app.state.poller.cancel()
     if app.state.nessie:
         if app.state.webhook_id:
             await app.state.nessie.delete_webhook(app.state.webhook_id)
         await app.state.nessie.aclose()
+
+
+async def _poll_events(interval: float = 2.0):
+    """Live-mode fallback when there's no public webhook URL: resume the /events feed from the latest
+    cursor and ingest money-movement events the same way the webhook receiver does."""
+    last = 0
+    try:  # start at the current tip so we don't replay the whole tenant's history
+        tip = await app.state.nessie.get_events(after=0, limit=500)
+        last = max((_seq(e) for e in tip), default=0)
+    except Exception:
+        pass
+    while True:
+        try:
+            for ev in await app.state.nessie.get_events(after=last, limit=200):
+                last = max(last, _seq(ev))
+                _ingest_nessie_event(ev)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[orchestrator] events poll error: {e}")
+        await asyncio.sleep(interval)
+
+
+def _seq(ev: dict) -> int:
+    v = ev.get("seq") or ev.get("id") or 0
+    return v if isinstance(v, int) else 0
+
+
+def _ingest_nessie_event(env: dict) -> None:
+    data = env.get("data", env)
+    account_id = env.get("account_id") or data.get("payer_id") or data.get("payee_id")
+    eid = None
+    for cand in (account_id, data.get("payer_id"), data.get("payee_id")):
+        eid = eid or (db.find_engagement_by_account(s.db_path, cand) if cand else None)
+    if eid:
+        db.add_event(s.db_path, eid, "nessie", env.get("type", "event"), {**data, "account_id": account_id})
+        indicators.recompute_and_store(s.db_path, eid)
 
 
 @app.get("/health")
@@ -209,17 +263,19 @@ async def internal_proxy_log(body: dict, x_internal_secret: str = Header(None)):
 
 @app.post("/webhooks/nessie")
 async def nessie_webhook(request: Request):
-    env = await request.json()
-    data = env.get("data", {})
-    account_id = env.get("account_id") or data.get("payer_id") or data.get("payee_id")
-    eid = db.find_engagement_by_account(s.db_path, account_id) if account_id else None
-    if not eid:
-        # Payee may be the mule (external); try payer explicitly.
-        for cand in (data.get("payer_id"), data.get("payee_id")):
-            eid = eid or (db.find_engagement_by_account(s.db_path, cand) if cand else None)
-    if eid:
-        db.add_event(s.db_path, eid, "nessie", env.get("type", "event"), {**data, "account_id": account_id})
-        indicators.recompute_and_store(s.db_path, eid)
+    raw = await request.body()
+    secret = getattr(app.state, "webhook_secret", "")
+    # Best-effort signature check: Nessie's exact signing header/algorithm isn't documented, so a
+    # mismatch is logged rather than rejected — better to record the event than to silently drop a
+    # real scammer's transfer over a format guess. The fake upstream signs with X-Nessie-Signature.
+    if secret:
+        import hashlib
+        import hmac
+        sig = request.headers.get("X-Nessie-Signature", "")
+        if sig and not hmac.compare_digest(sig, hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()):
+            print("[orchestrator] webhook signature mismatch (ingesting anyway)")
+    import json as _json
+    _ingest_nessie_event(_json.loads(raw or b"{}"))
     return {"ok": True}
 
 
