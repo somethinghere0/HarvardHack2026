@@ -50,9 +50,11 @@ and re-run `./start.sh` — it installs that integration's extra deps automatica
 - **Cloudflare tunnel**: Nessie webhooks need a public URL back to this machine. Quick tunnel:
   `cloudflared tunnel --url http://localhost:3000`, then put the printed URL in `PUBLIC_URL`. Without
   it the orchestrator falls back to polling `GET /events`.
-- **Gmail** (`GMAIL_FAKE=0`): OAuth "Desktop app" client, then `python backend/scripts/gmail_authorize.py`.
-  Run `python backend/scripts/gmail_watcher.py` to feed real inbound mail. Personas use `+` sub-addressing
-  (`you+persona_<id>@gmail.com`) so everything lands in one inbox.
+- **Gmail** (`GMAIL_FAKE=0`): easiest is an **App Password** — enable 2-Step Verification, generate one
+  at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords), set `GMAIL_APP_PASSWORD`
+  (SMTP/IMAP, no GCP project). Advanced: leave it blank to use OAuth via `python backend/scripts/gmail_authorize.py`.
+  Either way, run `python backend/scripts/gmail_watcher.py` to feed real inbound mail. Personas use `+`
+  sub-addressing (`you+persona_<id>@gmail.com`) so everything lands in one inbox.
 - **Daytona** (`DAYTONA_FAKE=0`): one disposable sandbox per engagement for the browser agent
   (https://www.daytona.io/docs/). The browser-automation script is a marked scaffold in `daytona_runner.py`.
 - **Photon / Anthropic**: optional synthetic identities and LLM classification/replies; both fall back

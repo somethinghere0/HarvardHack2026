@@ -38,6 +38,10 @@ class Settings:
 
     # Gmail (the single real inbox; personas are sub-addressed as inbox+persona_<id>@gmail.com).
     gmail_address: str = os.environ.get("GMAIL_ADDRESS", "you@example.com")
+    # Simple path: a 16-char App Password (needs 2-Step Verification on the account). If set, the
+    # orchestrator talks to Gmail over SMTP/IMAP — no GCP project, no OAuth, stdlib only.
+    gmail_app_password: str = os.environ.get("GMAIL_APP_PASSWORD", "").replace(" ", "").strip()
+    # Advanced path: OAuth user credentials (only used when no app password is set).
     gmail_credentials_file: str = os.environ.get("GMAIL_CREDENTIALS_FILE", "./secrets/gmail_oauth.json")
     gmail_token_file: str = os.environ.get("GMAIL_TOKEN_FILE", "./secrets/gmail_token.json")
 

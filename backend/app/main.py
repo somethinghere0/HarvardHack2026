@@ -125,7 +125,7 @@ def status():
         return "fake" if is_fake else "live"
     return {"services": {
         "nessie": mode(s.nessie_fake),
-        "gmail": mode(s.gmail_fake),
+        "gmail": gmail.mode,
         "daytona": mode(s.daytona_fake),
         "photon": mode(s.photon_fake),
         "anthropic": "live" if s.anthropic_api_key else "fake",

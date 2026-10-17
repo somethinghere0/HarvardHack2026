@@ -32,7 +32,8 @@ async function renderStatus() {
   try {
     const st = await api("/status");
     const strip = document.getElementById("status");
-    const chip = (name, mode) => h("span", { class: `svc ${mode === "live" ? "live" : mode === "fake" ? "fake" : "local"}` },
+    const cls = (m) => (m === "fake" ? "fake" : m === "local" || m === "polling" ? "local" : "live");
+    const chip = (name, mode) => h("span", { class: `svc ${cls(mode)}` },
       h("span", { class: "dot" }), `${name}: ${mode}`);
     strip.replaceChildren(
       ...Object.entries(st.services).map(([k, v]) => chip(k, v)),
