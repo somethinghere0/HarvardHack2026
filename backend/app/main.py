@@ -274,8 +274,8 @@ async def internal_send_otp(body: dict, x_internal_secret: str = Header(None)):
     expires = (datetime.now(timezone.utc) + timedelta(seconds=s.otp_ttl_seconds)).isoformat()
     db.create_otp(s.db_path, challenge_id, persona["id"], code, expires)
     # Email the persona inbox (best-effort — the agent reads the code from /internal/otp regardless).
-    subject = "Your Honeybank verification code"
-    text = f"Your Honeybank verification code is {code}. It expires in {s.otp_ttl_seconds // 60} minutes."
+    subject = "Your Bank of USA verification code"
+    text = f"Your Bank of USA verification code is {code}. It expires in {s.otp_ttl_seconds // 60} minutes."
     emailed = False
     try:
         gmail.send(persona["email"], subject, text)

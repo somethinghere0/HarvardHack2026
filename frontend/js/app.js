@@ -22,7 +22,7 @@ function topbar(username, active) {
     h("button", { class: active === route ? "active" : "", onClick: () => go(route) }, label);
   return h("header", { class: "topbar" },
     h("div", { class: "brand", onClick: () => go("dashboard") },
-      h("span", { class: "brand-mark" }, "H"), h("span", {}, "Honeybank")),
+      h("span", { class: "brand-mark" }, "US"), h("span", {}, "Bank of USA")),
     username && h("nav", { class: "nav" },
       navItem("Accounts", "dashboard"), navItem("Transfer", "transfer"), navItem("Deposit", "deposit")),
     h("div", { class: "topbar-right" },
@@ -33,7 +33,7 @@ function topbar(username, active) {
 
 function shell(username, active, ...content) {
   return [topbar(username, active), h("main", { class: "wrap" }, ...content),
-    h("footer", { class: "foot" }, "Honeybank · a canary-account demo. Not a real bank; no real money moves.")];
+    h("footer", { class: "foot" }, "Bank of USA · Equal Housing Lender · Member FDIC (simulation). Not a real bank; no real money moves.")];
 }
 
 // --- auth -----------------------------------------------------------------
@@ -49,14 +49,14 @@ function modeToggle() {
 function authAside() {
   const point = (text) => h("div", { class: "auth-point" }, h("span", { class: "tick" }, "✓"), text);
   return h("aside", { class: "auth-aside" },
-    h("div", { class: "brand" }, h("span", { class: "brand-mark lg" }, "H"), h("span", {}, "Honeybank")),
-    h("h1", {}, "Banking that keeps scammers busy."),
+    h("div", { class: "brand" }, h("span", { class: "brand-mark lg" }, "US"), h("span", {}, "Bank of USA")),
+    h("h1", {}, "Banking built for all of us."),
     h("p", { class: "lede" },
-      "Your everyday accounts, plus canary accounts that lure fraudsters into the open. Backed by the Capital One Nessie sandbox."),
+      "Checking, savings, and credit cards in one place — with online and mobile banking, 24/7."),
     h("div", { class: "auth-points" },
       point("Checking, savings & credit in one place"),
       point("Move money in seconds"),
-      point("Every transaction monitored for fraud")));
+      point("Security & fraud monitoring, around the clock")));
 }
 
 function authShell(title, subtitle, form, footer) {
@@ -149,7 +149,7 @@ function signupView() {
     });
   }
 
-  render(...authShell("Create your account", "Opens a Capital One (Nessie) customer profile", form,
+  render(...authShell("Open your account", "Join Bank of USA in a few minutes", form,
     h("p", { class: "auth-alt" }, "Already have one? ", h("a", { href: "#", onClick: nav("login") }, "Sign in"))));
 }
 
@@ -273,7 +273,7 @@ async function transferView(preselectFrom) {
     list: "own-accts", autocomplete: "off" });
   const form = h("form", { class: "card form-card", onSubmit: onSubmit },
     field("From", fromSel),
-    field("To", toInput, "Any Capital One account id. Your own accounts are suggested; paste another to send outside."),
+    field("To", toInput, "Any Bank of USA account number. Your own accounts are suggested; paste another to send to someone else."),
     h("datalist", { id: "own-accts" }, ...accounts.map((a) => h("option", { value: a.id }, a.nickname))),
     field("Amount", h("input", { name: "amount", type: "number", min: "0.01", step: "0.01", required: true, placeholder: "0.00" })),
     field("Note", h("input", { name: "description", maxlength: 120, placeholder: "What's this for?" })),

@@ -30,7 +30,7 @@ def _is_our_mail(s, m: dict) -> bool:
     local = s.gmail_address.split("@")[0].lower()
     sender = (m.get("sender") or "").lower()
     subj = (m.get("subject") or "").lower()
-    return local and local in sender and ("honeybank verification" in subj or subj.startswith("re:"))
+    return local and local in sender and ("bank of usa verification" in subj or subj.startswith("re:"))
 
 
 def main() -> None:
