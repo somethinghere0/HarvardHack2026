@@ -12,3 +12,5 @@ venv/
 .env.local
 .env.*
 !.env.example
+.venv/
+scratchpad/

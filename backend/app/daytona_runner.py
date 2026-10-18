@@ -24,7 +24,11 @@ from .identity import generate_identity
 from .nessie import NessieAdmin, logged as nessie_logged
 from .proxy_client import ProxyClient
 
-_AGENT_PATH = os.path.join(os.path.dirname(__file__), "..", "agent", "bank_agent.py")
+_AGENT_DIR = os.path.join(os.path.dirname(__file__), "..", "agent")
+# AGENT_DRIVER selects the decoy brain: "dom" (default) scrapes the page and emits JSON actions
+# (bank_agent.py); "computer_use" drives a real screen with Claude's computer toolset (cu_agent.py).
+_DRIVER = os.environ.get("AGENT_DRIVER", "dom").strip().lower()
+_AGENT_PATH = os.path.join(_AGENT_DIR, "cu_agent.py" if _DRIVER == "computer_use" else "bank_agent.py")
 
 
 _TUNNEL_HOSTS = (".trycloudflare.com", ".ngrok-free.app", ".ngrok-free.dev", ".ngrok.app", ".ngrok.dev", ".ngrok.io")
