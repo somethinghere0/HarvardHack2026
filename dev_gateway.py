@@ -17,6 +17,14 @@ _METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
 app = FastAPI()
 
 
+@app.middleware("http")
+async def _no_cache(request: Request, call_next):
+    # Dev: never let the browser cache the frontend, so edits always show without a hard refresh.
+    resp = await call_next(request)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
+
+
 async def _forward(base: str, path: str, request: Request) -> Response:
     async with httpx.AsyncClient(timeout=120) as c:
         r = await c.request(
