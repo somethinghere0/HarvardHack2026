@@ -35,6 +35,11 @@ scam email ─▶ Gmail watcher ─▶ orchestrator ──┬─▶ Claude      
 | `proxy` | [`proxy/`](proxy/README.md) | Auth + Nessie gateway. Holds the Nessie key, adds username/password login and a one-time-code second factor, scopes every session to its own customer, enforces the per-transfer limit, and attributes every request to a session and an actor (`agent` or `external`). |
 | `backend` | `backend/` | Orchestrator: email intake, decoy persona lifecycle, the agent runner, Nessie event ingest, the outcome judge, indicators, playbook, intel (watchlist, crews, money flow), scam memory, and the scenario swarm. The agents live in `backend/agent/`. |
 | `frontend` | `frontend/` | `/` is Bank of USA, a working retail bank over Nessie. `/ops.html` is the Scam Tracker. nginx (or `dev_gateway.py` locally) routes `/bank-api` to the proxy and `/api` to the orchestrator. |
+| `email-generator` | `email-generator/` | Static page for judges and demo visitors: compose a scam email aimed at the bank and send it to the watched inbox. Deployed at https://harvardhack2026-email-generator.vercel.app/. |
+
+The decoy agent has two drivers, chosen with `AGENT_DRIVER`: `dom` (default, `backend/agent/bank_agent.py`)
+reads the page and emits JSON actions; `computer_use` (experimental, `backend/agent/cu_agent.py`) drives a
+real screen with Claude's computer-use toolset.
 
 ## Keys you need (`.env`)
 
@@ -150,7 +155,7 @@ runner waits for the decoy to be funded before the agent starts.
 ## Tests
 
 ```bash
-make test        # 13 tests: proxy auth/OTP/scope/limit, indicators, outcome ledger lag, playbook, canary + decision hook
+make test        # 23 tests: proxy auth/OTP/scope/limit (10); indicators, outcome ledger lag, playbook, canary + decision hook (13)
 ```
 
 Design notes for the proxy: `.plans/`. Demo run-of-show: [`docs/DEMO.md`](docs/DEMO.md). Devpost text:
