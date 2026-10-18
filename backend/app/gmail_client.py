@@ -70,7 +70,7 @@ class Gmail:
     # ---- IMAP (app-password mode) -------------------------------------------
 
     def _imap(self) -> imaplib.IMAP4_SSL:
-        M = imaplib.IMAP4_SSL(_IMAP_HOST)
+        M = imaplib.IMAP4_SSL(_IMAP_HOST, timeout=30)  # a stalled connection must not hang the watcher
         M.login(self.s.gmail_address, self.s.gmail_app_password)
         return M
 

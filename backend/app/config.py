@@ -20,6 +20,19 @@ class Settings:
     # the agent signs into — plus the Nessie webhook callback. Blank => poll GET /events for webhooks.
     public_url: str = os.environ.get("PUBLIC_URL", "").rstrip("/")
 
+    # This orchestrator's own address as seen from this machine (the local agent runtime reports here).
+    local_url: str = os.environ.get("ORCH_LOCAL_URL", "http://127.0.0.1:8001").rstrip("/")
+    # The bank frontend as seen from this machine (used when there's no PUBLIC_URL).
+    local_bank_url: str = os.environ.get("LOCAL_BANK_URL", "http://127.0.0.1:3000").rstrip("/")
+
+    # Where the decoy agent runs: auto (Daytona if the sandbox can reach PUBLIC_URL, else local),
+    # daytona, or local.
+    agent_runtime: str = os.environ.get("AGENT_RUNTIME", "auto").strip().lower() or "auto"
+    # Every inbound email is detonated in its own sandbox; this caps how many run at once.
+    max_detonations: int = int(os.environ.get("MAX_DETONATIONS", "3"))
+    # After the agent finishes, how long to wait for Nessie's transfer events to land before judging.
+    verdict_grace_seconds: float = float(os.environ.get("VERDICT_GRACE_SECONDS", "8"))
+
     # Nessie v2 (shared with the proxy).
     nessie_base_url: str = os.environ.get("NESSIE_BASE_URL", "https://v2-prod-api.nessieisreal.com").rstrip("/")
     nessie_api_key: str = os.environ.get("NESSIE_API_KEY", "").strip()
@@ -39,6 +52,11 @@ class Settings:
     gmail_quarantine_label: str = os.environ.get("GMAIL_QUARANTINE_LABEL", "Honeybank/Quarantine")
     gmail_safe_label: str = os.environ.get("GMAIL_SAFE_LABEL", "Honeybank/Safe")
     gmail_archive_scams: bool = os.environ.get("GMAIL_ARCHIVE_SCAMS", "0").strip().lower() in ("1", "true", "yes", "on")
+    # Mail this system sends to itself (OTP codes to persona sub-addresses) is back-channel traffic
+    # between the bank and a sandbox, not something the inbox owner should see. The watcher files it
+    # under gmail_internal_label and archives it out of the inbox unless this is turned off.
+    gmail_internal_label: str = os.environ.get("GMAIL_INTERNAL_LABEL", "Honeybank/Internal")
+    gmail_hide_internal_mail: bool = os.environ.get("GMAIL_HIDE_INTERNAL_MAIL", "1").strip().lower() in ("1", "true", "yes", "on")
 
     # Daytona (one disposable sandbox per engagement for the decoy agent).
     daytona_api_key: str = os.environ.get("DAYTONA_API_KEY", "").strip()
@@ -50,6 +68,13 @@ class Settings:
     anthropic_model: str = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5-5").strip()
 
     otp_ttl_seconds: int = int(os.environ.get("OTP_TTL_SECONDS", "300"))
+
+    # The bank's per-transfer ceiling (the proxy enforces it; shown in the playbook). Same env var.
+    transfer_limit_cents: int = int(os.environ.get("TRANSFER_LIMIT_CENTS", "500000"))
+    # Bank-wide screening: every pending transfer under this key is checked against the mule
+    # watchlist the honeypot builds. With a public URL that's a Nessie decision hook (declined
+    # before it settles); otherwise the poller cancels it inside the pending window.
+    watchlist_block: bool = os.environ.get("WATCHLIST_BLOCK", "1").strip().lower() in ("1", "true", "yes", "on")
 
     def require(self, *names: str) -> None:
         missing = [n for n in names if not getattr(self, n)]

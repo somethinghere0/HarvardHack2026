@@ -28,6 +28,12 @@ class Settings:
     # Orchestrator for OTP email + request/login telemetry. Empty disables those calls.
     orchestrator_url: str = ""
     internal_secret: str = "dev-internal-secret"
+    # Tripwire: a per-transfer ceiling the bank enforces (cents; 0 disables). A scammer who discovers
+    # it and splits the drain underneath it is structuring — and that's observable behaviour.
+    transfer_limit_cents: int = 500000
+    # Requests carrying this header come from the decoy agent's own browser. Any sign-in to a decoy
+    # account WITHOUT it is a third party using phished credentials.
+    agent_header: str = "x-decoy-agent"
 
 
 def load_settings() -> Settings:
@@ -46,4 +52,5 @@ def load_settings() -> Settings:
         enforce_customer_scope=_b("ENFORCE_CUSTOMER_SCOPE", Settings.enforce_customer_scope),
         orchestrator_url=os.environ.get("ORCHESTRATOR_URL", Settings.orchestrator_url).rstrip("/"),
         internal_secret=os.environ.get("INTERNAL_SECRET", Settings.internal_secret),
+        transfer_limit_cents=int(os.environ.get("TRANSFER_LIMIT_CENTS", Settings.transfer_limit_cents)),
     )

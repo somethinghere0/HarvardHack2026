@@ -29,12 +29,19 @@ fi
 # 3. core deps (quiet, idempotent) — everything is live, so Claude is always needed
 echo "  installing dependencies…"
 "$PIP" install -q --upgrade pip >/dev/null
-"$PIP" install -q fastapi "uvicorn[standard]" httpx argon2-cffi python-multipart anthropic certifi
+"$PIP" install -q fastapi "uvicorn[standard]" httpx argon2-cffi python-multipart anthropic certifi playwright pytest
+# The decoy agent's browser for the host runtime (used when Daytona's egress allowlist blocks the tunnel).
+"$VENV/bin/python" -m playwright install chromium >/dev/null || echo "    (chromium install failed; the local agent runtime won't work)"
 
 # 4. integration deps based on .env (non-fatal: a failed optional install shouldn't stop startup)
 haskey() { grep -qE "^$1=[^[:space:]]" .env; }
 if haskey DAYTONA_API_KEY; then echo "  + Daytona SDK…"; "$PIP" install -q daytona || echo "    (Daytona SDK install failed; the agent won't run)"; fi
 if ! haskey GMAIL_APP_PASSWORD && haskey GMAIL_ADDRESS; then echo "  + Gmail OAuth libs…"; "$PIP" install -q google-api-python-client google-auth google-auth-oauthlib || echo "    (Gmail OAuth libs failed; use an App Password instead)"; fi
+
+# 5. tunnel: dev.py starts ngrok itself; it just needs to be installed and logged in.
+if ! command -v ngrok >/dev/null 2>&1; then
+  echo "  ! ngrok not found — install it for the public URL: brew install ngrok && ngrok config add-authtoken <token>"
+fi
 
 echo "→ starting (Ctrl+C to stop)"
 exec "$VENV/bin/python" dev.py

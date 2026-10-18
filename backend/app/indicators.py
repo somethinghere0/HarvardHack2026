@@ -19,6 +19,10 @@ _WEIGHTS = {
     "full_drain": 25,          # account emptied
     "contact_change": 15,      # locking the victim out
     "new_payee": 10,
+    "third_party_login": 40,   # phished credentials used by someone other than the decoy agent
+    "limit_probe": 10,         # tried an amount over the bank's per-transfer limit
+    "internal_sweep": 10,      # savings → checking before sending out (knows how transfers work)
+    "known_mule": 30,          # the payee is a mule seen in another engagement
 }
 
 _LABELS = {
@@ -29,6 +33,10 @@ _LABELS = {
     "full_drain": "Account drained",
     "contact_change": "Contact info changed (victim lockout)",
     "new_payee": "New payee added",
+    "third_party_login": "Phished credentials used by a third party",
+    "limit_probe": "Attempted a transfer over the bank's limit",
+    "internal_sweep": "Swept savings into checking before the drain",
+    "known_mule": "Mule account seen in another engagement",
 }
 
 
@@ -80,6 +88,15 @@ def compute(path: str, engagement_id: str) -> dict:
         tags.add("contact_change")
     if any(e["type"] == "payee.added" for e in events):
         tags.add("new_payee")
+    if any(e["type"] == "credential.used_by_third_party" for e in events):
+        tags.add("third_party_login")
+    if any(e["type"] == "transfer.declined" for e in events):
+        tags.add("limit_probe")
+    if any(e["type"] == "money.attempt" and e["data"].get("status") == "accepted"
+           and e["data"].get("kind") == "transfer" and e["data"].get("payee_id") in persona_accounts for e in events):
+        tags.add("internal_sweep")
+    if any(e["type"] == "watchlist.match" for e in events):
+        tags.add("known_mule")
 
     score = min(100, sum(_WEIGHTS.get(t, 0) for t in tags))
     return {
@@ -90,10 +107,17 @@ def compute(path: str, engagement_id: str) -> dict:
     }
 
 
+# Statuses a verdict or a canary set; indicator recomputes must not bump them back to 'active'.
+_SETTLED = {"armed", "confirmed", "cleared", "inconclusive", "drained", "compromised", "closed"}
+
+
 def recompute_and_store(path: str, engagement_id: str) -> dict:
     result = compute(path, engagement_id)
     status_bump = {}
-    if "full_drain" in result["tags"]:
+    cur = (db.get_engagement(path, engagement_id) or {}).get("status")
+    if cur in _SETTLED:
+        pass
+    elif "full_drain" in result["tags"]:
         status_bump["status"] = "drained"
     elif result["tags"]:
         status_bump["status"] = "active"

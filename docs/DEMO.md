@@ -8,9 +8,10 @@ A 3–4 minute live run-of-show. Two windows open: **Bank of USA** (`PUBLIC_URL/
 ## 0. Pre-demo checklist (do this before you present)
 
 - [ ] `.env` filled: `NESSIE_API_KEY`, `ANTHROPIC_API_KEY`, `DAYTONA_API_KEY`, `GMAIL_ADDRESS` +
-      `GMAIL_APP_PASSWORD`, `INTERNAL_SECRET`, and `PUBLIC_URL` (your tunnel).
+      `GMAIL_APP_PASSWORD`, `INTERNAL_SECRET`, and `NGROK_DOMAIN` (your free static ngrok domain).
 - [ ] **IMAP enabled** in Gmail settings (Settings → Forwarding and POP/IMAP → Enable IMAP).
-- [ ] Tunnel running: `cloudflared tunnel --url http://localhost:3000` → paste URL into `PUBLIC_URL`.
+- [ ] ngrok installed + authed (`ngrok config add-authtoken …`). `./start.sh` starts it; the log prints
+      `Public (tunnel): https://<your-domain>/` — that's the link for the scam email.
 - [ ] Stack running: `./start.sh`. Confirm the startup log shows
       `Email firewall: ... watching for NEW mail` and `webhooks ... ` live.
 - [ ] Open **Bank of USA** at `PUBLIC_URL/` and **Scam Tracker** at `PUBLIC_URL/ops.html`.
@@ -20,9 +21,10 @@ A 3–4 minute live run-of-show. Two windows open: **Bank of USA** (`PUBLIC_URL/
 - [ ] **Fallback ready:** keep the **`./simulate --drain`** button in mind — it runs the whole pipeline
       without waiting for a real email (use it if Gmail/tunnel is flaky on stage).
 
-> Timing note: a real Daytona run spends ~2–3 min installing Chromium before the browser frames
-> appear (you'll see those lines in the terminal). Start the email early, or narrate the firewall +
-> dashboard while it boots.
+> Timing note: on Daytona Tier 1/2 the sandbox can't reach the ngrok tunnel, so the agent falls back
+> to the host runtime within seconds (the tracker's terminal shows "daytona egress allowlist → host
+> runtime") and frames appear almost immediately. On Tier 3+ a sandbox run spends ~2–3 min installing
+> Chromium first — start the email early, or narrate the firewall + dashboard while it boots.
 
 ---
 
@@ -37,22 +39,27 @@ Capital One's Nessie sandbox. Looks legit, right? That's the point."
 
 ## 2. The scam arrives (30s)
 
-From a different email account, send to your monitored Gmail:
+Before the demo, get a ready-made scam with a fresh scammer (mule) account baked in:
 
-> **Subject:** Action required: unusual sign-in on your account
->
-> We detected an unusual sign-in to your account. To avoid suspension, verify your identity now:
-> `PUBLIC_URL/`  *(paste your actual Bank of USA URL here)*
-> This is your final notice.
+```
+curl -s PUBLIC_URL/api/sim/scam-email
+```
 
-> "I'm the scammer. I just sent our user a phishing email with a link to 'verify.'"
+From a different email account, send that subject + body to your monitored Gmail. It's a "safe
+account" scam: *sign in at the Bank of USA link and move your full balance to our protected holding
+account acct_…*.
 
-Switch to **Scam Tracker**. Within ~10s the email appears in **`// inbound · every email vetted`**,
-tagged **[SCAM] · credential_phishing · quarantined**. A safe email (send a normal one too) shows
-**[SAFE] · delivered**.
+> Don't use a plain "verify your sign-in at PUBLIC_URL" email any more: that link is the real bank,
+> so following it costs the victim nothing and the firewall (correctly) calls it safe.
 
-> "Our firewall read every inbound email, classified this one with Claude as credential phishing,
-> and quarantined it out of the inbox. But instead of just blocking it — watch what it does next."
+> "I'm the scammer. I just sent our user an email telling them to move their money somewhere safe."
+
+Switch to **Scam Tracker**. Within ~10s the email appears in **`// inbound · every email detonated`**
+as **[RUNNING] · held**. Send a normal email too (a YouTube link from a friend). It gets the same
+treatment and comes out **[SAFE] · delivered** once its sandbox run finishes.
+
+> "Our firewall doesn't guess from the wording. Every email is held and detonated: a decoy victim
+> with a real, funded bank account does exactly what the email says, and we watch what it costs."
 
 ## 3. The sandbox falls for it (90s — the centerpiece)
 
@@ -90,7 +97,7 @@ Show on the detail panel:
 
 ## 5. Close (15s)
 
-> "So: an email firewall that doesn't just block scams — it lets them play out against a decoy,
+> "So: an email firewall that doesn't classify scams, it proves them. Every email plays out against a decoy,
 > captures the attacker's playbook, and turns every phishing attempt into threat intelligence.
 > That's Bank of USA and the Scam Tracker."
 
@@ -105,8 +112,11 @@ Show on the detail panel:
   install progress. If it stalls, use `./simulate --drain` which exercises the same login → OTP →
   drain path.
 - **Status chip shows `missing`:** that integration's key isn't set — check `.env` and restart.
-- **Tunnel URL changed:** quick tunnels get a new URL each run; update `PUBLIC_URL` and restart, or
-  use a named tunnel for a stable address.
+- **Tunnel down / URL changed:** `dev.py` always uses the live ngrok URL. Set `NGROK_DOMAIN` so the
+  address never changes. "ngrok didn't come up" usually means another ngrok agent is already running
+  elsewhere (free plan allows one) or the authtoken isn't set — see `.devdata/ngrok.log`.
+- **Browser view shows "no browser frames captured":** the error under it is the real cause (e.g.
+  the bank URL was unreachable). Fix, then rerun with `./simulate --drain`.
 
 ## One-liner for the judges
 
