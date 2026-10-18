@@ -1,10 +1,11 @@
 to,cc,subject,body
-recipient@example.com,,Urgent action required,"Dear Mr. Ty,
+recipient@example.com,,Bank of USA: unusual activity on your account,"Dear Bank of USA customer,
 
-We're having some trouble with your current account information. We have attached
-a link before to check and verify your information.
+We detected unusual activity on your account and have temporarily limited some features for your protection. To restore full access, please verify your account details using the secure link below:
 
 {link}
 
-Best regards,
-Scammer"
+For your security, please complete this verification within 24 hours. Accounts that are not verified may be temporarily suspended.
+
+Thank you,
+Bank of USA — Account Security Team"
