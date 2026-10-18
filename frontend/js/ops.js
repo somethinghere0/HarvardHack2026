@@ -112,13 +112,7 @@ async function renderDetail(id) {
         h("span", { class: "src" }, ev.source),
         h("span", {}, ev.type + eventDetail(ev))))));
 
-  const shots = (d.shots || []);
-  const filmstrip = shots.length ? h("div", { class: "card" },
-    h("h3", { style: "font-size:14px;margin-bottom:10px" }, "Agent's browser (sandbox)"),
-    h("div", { class: "filmstrip" }, ...shots.map((sh) =>
-      h("figure", { class: "shot" },
-        h("img", { src: sh.image, alt: sh.label || "" , loading: "lazy" }),
-        h("figcaption", {}, `${sh.step}. ${sh.label || ""}`))))) : null;
+  const sandboxCard = buildSandbox(d);
 
   const emails = d.emails.length ? h("div", { class: "card" },
     h("h3", { style: "font-size:14px;margin-bottom:10px" }, "Messages"),
@@ -133,7 +127,82 @@ async function renderDetail(id) {
       h("span", { class: `risk ${riskClass(eng.risk_score)}`, style: "font-size:22px" }, eng.risk_score + "/100")),
     eng.summary && h("p", { class: "muted", style: "margin:-6px 0 2px" }, eng.summary),
     h("div", { class: "pills" }, h("span", { class: "pill" }, eng.status), ...(eng.tags || []).map((t) => h("span", { class: "pill danger" }, t.replace(/_/g, " ")))),
-    personaCard, filmstrip, indCard, timeline, emails));
+    sandboxCard, personaCard, indCard, timeline, emails));
+
+  const term = panelEl.querySelector(".sb-term");
+  if (term) term.scrollTop = term.scrollHeight;  // keep the terminal pinned to the newest line
+}
+
+// --- Daytona sandbox viewer: watch the agent work inside the container -------
+
+function buildSandbox(d) {
+  const ev = d.events || [];
+  const shots = d.shots || [];
+  const has = ev.some((e) => ["sandbox.launching", "agent.started", "agent.step"].includes(e.type));
+  if (!has && !shots.length) return null;
+
+  const finished = ev.some((e) => ["sandbox.finished", "agent.finished", "agent.error"].includes(e.type));
+  const errored = ev.some((e) => e.type === "agent.error");
+  const running = !finished;
+  const sid = (ev.find((e) => e.type === "sandbox.created")?.data?.sandbox_id)
+    || "sbx-" + (d.engagement?.id || "").slice(0, 8);
+  const target = ev.find((e) => e.type === "portal.detected")?.data?.url
+    || ev.find((e) => e.type === "sandbox.launching")?.data?.bank || "";
+  const lastStep = [...ev].reverse().find((e) => e.type === "agent.step");
+  const url = (lastStep?.data?.url) || target || "about:blank";
+  const shot = shots[shots.length - 1];
+
+  const lines = termLines(ev);
+  const term = h("div", { class: "sb-term" },
+    h("div", { class: "ln dim" }, h("span", { class: "lt" }, ""), "daytona cloud · ephemeral sandbox"),
+    ...lines.map((l) => h("div", { class: `ln ${l.cls || ""}` }, h("span", { class: "lt" }, l.t), l.text)),
+    running ? h("div", { class: "ln cur" }, h("span", { class: "lt" }, ""), h("span", { class: "blink" }, "▋")) : null);
+
+  const view = h("div", { class: "sb-view" },
+    h("div", { class: "sb-chrome" },
+      h("span", { class: "c-dots" }, h("i"), h("i"), h("i")),
+      h("span", { class: "c-url" }, shortUrl(url))),
+    shot
+      ? h("img", { class: "sb-screen", src: shot.image, alt: shot.label || "" })
+      : h("div", { class: "sb-boot" }, h("span", { class: "spin" }), "booting chromium runtime…"));
+
+  return h("div", { class: `sandbox ${running ? "run" : errored ? "err" : "done"}` },
+    h("div", { class: "sb-bar" },
+      h("span", { class: "c-dots" }, h("i"), h("i"), h("i")),
+      h("span", { class: "sb-title" }, `daytona ◦ ${sid}`),
+      h("span", { class: "sb-state" }, running ? "● running" : errored ? "✗ error" : "○ terminated")),
+    h("div", { class: "sb-body" }, term, view));
+}
+
+const _GLYPH = { err: "✗", ok: "✓", cmd: "$", step: "▸" };
+function termLines(events) {
+  const out = [];
+  const push = (t, text, cls) => out.push({ t: fmtTime(t), text: `${_GLYPH[cls] || "▸"} ${text}`, cls: cls === "err" ? "err" : cls === "ok" ? "ok" : cls === "cmd" ? "cmd" : "" });
+  for (const e of events) {
+    const x = e.data || {}, t = e.created_at;
+    switch (e.type) {
+      case "sandbox.launching": push(t, `daytona create --snapshot chromium`, "cmd"); push(t, `pip install playwright anthropic · launching chromium`, "cmd"); break;
+      case "sandbox.created": push(t, `sandbox ${x.sandbox_id || ""} ready`, "ok"); break;
+      case "agent.started": push(t, `agent online → ${shortUrl(x.bank || x.portal || "")}`); break;
+      case "agent.step": push(t, x.observation || `step @ ${shortUrl(x.url || "")}`); break;
+      case "otp.sent": push(t, `one-time code issued to inbox`); break;
+      case "agent.otp_relayed": push(t, `OTP ${x.got ? "read from inbox, entered ✓" : "requested…"}`, x.got ? "ok" : ""); break;
+      case "session.login": push(t, `signed in as @${x.username || "victim"}`, "ok"); break;
+      case "payee.added": push(t, `added external payee ${String(x.payee_id || "").slice(-6)}`); break;
+      case "transfer.created": push(t, `transfer ${money((x.amount_cents || 0) / 100)} → mule`); break;
+      case "scammer.drain": case "engagement.drained": push(t, `account drained · ${money((x.moved_cents || 0) / 100)} moved`, "ok"); break;
+      case "agent.finished": push(t, `sequence complete`, "ok"); break;
+      case "sandbox.finished": push(t, `daytona sandbox delete`, "cmd"); break;
+      case "agent.error": push(t, x.error || "agent error", "err"); break;
+      default: break;
+    }
+  }
+  return out;
+}
+
+function shortUrl(u) {
+  if (!u) return "about:blank";
+  return u.replace(/^https?:\/\//, "").replace(/\/$/, "").slice(0, 46);
 }
 
 function eventDetail(ev) {
