@@ -551,6 +551,15 @@ def list_interdictions(path: str, limit: int = 100) -> list[dict]:
             "SELECT * FROM interdictions ORDER BY id DESC LIMIT ?", (limit,)).fetchall()]
 
 
+def update_interdiction(path: str, row_id: int, **fields) -> None:
+    fields = {k: v for k, v in fields.items() if k in ("action", "reason", "source")}
+    if not fields:
+        return
+    cols = ", ".join(f"{k} = ?" for k in fields)
+    with connect(path) as c:
+        c.execute(f"UPDATE interdictions SET {cols} WHERE id = ?", (*fields.values(), row_id))
+
+
 def interdiction_for_tx(path: str, tx_id: str) -> dict | None:
     with connect(path) as c:
         r = c.execute("SELECT * FROM interdictions WHERE tx_id = ? ORDER BY id DESC LIMIT 1", (tx_id,)).fetchone()

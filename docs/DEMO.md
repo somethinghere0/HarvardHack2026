@@ -15,6 +15,7 @@ A 3–4 minute live run-of-show. Two windows open: **Bank of USA** (`PUBLIC_URL/
 - [ ] Stack running: `./start.sh`. Confirm the startup log shows
       `Email firewall: ... watching for NEW mail` and `webhooks ... ` live.
 - [ ] Open **Bank of USA** at `PUBLIC_URL/` and **Scam Tracker** at `PUBLIC_URL/ops.html`.
+- [ ] Run `make test` once (13 tests) so you can say the suite is green.
 - [ ] On the tracker, the status strip should read **nessie / gmail / daytona / anthropic / webhooks**
       all green.
 - [ ] Draft the scam email on your phone so you can send it in one tap (see §2).
@@ -95,6 +96,46 @@ Show on the detail panel:
 > within minutes. That's a fraud feed a bank could act on. No real money moved, no real person was
 > ever involved."
 
+## 4b. The scammer comes back (40s — the proof)
+
+The row says **scam · likely** and the engagement is **ARMED**: the decoy account is still live and the
+scammer is holding its login. On a phone or a second browser, open the bank, sign in with the decoy's
+user ID + password shown in the **ARMED** card, and type the one-time code the card shows.
+
+> "Right now the system only *inferred* this was a scam from what the decoy lost. Watch what happens
+> when the scammer actually uses what they stole."
+
+The terminal prints **CANARY · phished credentials used by a third party**, the row flips to
+**scam · confirmed**, and the **Playbook** card profiles the intruder: time from login to first move,
+what they read first, whether they changed the contact email (lockout), whether they hit the $5,000
+limit and split the transfer underneath it (structuring), and a fingerprint. Do one or two of those
+moves live — change the email under *Profile & Settings*, try a $7,000 transfer, then two $4,900s.
+
+> "Nobody but the scammer could have those credentials. That's not a classifier — that's a confession."
+
+## 4c. The bank fights back (30s — the Nessie payoff)
+
+Scroll to **// bank-wide · mule watchlist**. The mule is on it. Click **`./simulate --customer-pays-mule`**:
+an ordinary customer (not a decoy) tries to pay the same "protected holding account".
+
+> "Nessie asks us before any transfer settles. This one is going to a mule our honeypot identified
+> three minutes ago — declined, before the money moves, and the reason names the engagement."
+
+Optional: **`./simulate --launder`** in the ARMED card makes the mule fan the money out to a layer of
+fresh accounts and cash out; the **Money flow** card draws decoy → mule → layer → cash, read live
+from Nessie, and the layer accounts join the watchlist.
+
+## 4d. Memory and the swarm (optional, 20s)
+
+Switch the tracker to **scam memory**: one dossier per scam ever detonated (lure themes, sender domain,
+phishing host, mule, operator profile) and the patterns that repeat across them. Then **scenario swarm**:
+Nessie generates a bank's worth of transactions with one of eight scam types planted, every customer is
+analysed in its own Daytona sandbox, and the scoreboard compares what was flagged with what Nessie
+planted. Click **`launch swarm`** only if you have two spare minutes; otherwise show the last run.
+
+> "Phishing is one vector. The same sandbox fabric scores account takeover, card testing, structuring,
+> and five more, against ground truth Nessie gives us."
+
 ## 5. Close (15s)
 
 > "So: an email firewall that doesn't classify scams, it proves them. Every email plays out against a decoy,
@@ -120,5 +161,5 @@ Show on the detail panel:
 
 ## One-liner for the judges
 
-> "We let scammers rob a fake bank in a sandbox, and we keep the receipts — where the money went and
-> how they moved it."
+> "We let scammers rob a decoy inside the bank, wait for them to come back for it, and the receipts
+> protect every other customer in real time."

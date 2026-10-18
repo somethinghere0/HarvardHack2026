@@ -64,10 +64,11 @@ async def _orchestrator_post(request: Request, path: str, body: dict) -> None:
 
 def who(request: Request) -> dict:
     """Who is at the keyboard, as far as the bank can tell: the decoy agent marks its own browser's
-    requests with a header; anything else signing in to a decoy is a third party with phished
-    credentials. Plus the client address and browser, for the engagement's intruder log."""
+    requests with a header (the orchestrator's seeding calls mark themselves `system`); anything else
+    signing in to a decoy is a third party with phished credentials. Plus the client address and browser, for the engagement's intruder log."""
     s = request.app.state.settings
-    actor = "agent" if request.headers.get(s.agent_header) else "external"
+    mark = request.headers.get(s.agent_header, "")
+    actor = "system" if mark == "system" else "agent" if mark else "external"
     return {"actor": actor, "ip": request.client.host if request.client else None,
             "ua": request.headers.get("user-agent", "")[:300]}
 

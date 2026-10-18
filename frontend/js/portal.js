@@ -49,7 +49,7 @@ export const TABS = [
   { label: "Help & Support" },
 ];
 
-export function olbHeader({ badge, onHome, onLogout }) {
+export function olbHeader({ badge, onHome, onLogout, onProfile }) {
   const search = h("form", { class: "olb-search", role: "search", onSubmit: fakeLink },
     h("input", { type: "search", placeholder: "How can we help you?", "aria-label": "Help search" }),
     h("button", { type: "submit", "aria-label": "Search" }, svg(I.search)));
@@ -57,7 +57,7 @@ export function olbHeader({ badge, onHome, onLogout }) {
     h("div", { class: "olb-brand" }, logo(onHome), h("span", { class: "olb-product" }, "Online Banking")),
     h("div", { class: "olb-util" },
       badge,
-      A("Profile & Settings", "olb-util-link"),
+      A("Profile & Settings", "olb-util-link", onProfile ? (e) => { e.preventDefault(); onProfile(); } : undefined),
       h("span", { class: "olb-sep" }),
       A("Saved Items", "olb-util-link"),
       h("span", { class: "olb-sep" }),

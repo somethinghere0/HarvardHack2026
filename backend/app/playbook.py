@@ -90,6 +90,8 @@ def sessions(events: list[dict]) -> list[dict]:
             continue
         d = e.get("data") or {}
         t = e["type"]
+        if d.get("actor") == "system":  # the orchestrator seeding the decoy, not anyone at a keyboard
+            continue
         if t == "login.password_ok":
             pending_pw.append(e)
             continue
@@ -112,6 +114,8 @@ def sessions(events: list[dict]) -> list[dict]:
                 if label and not s["money"]:  # only reads BEFORE the first money movement count as recon
                     s["reads"].append({"at": e["created_at"], "what": label, "path": d.get("path")})
         elif t == "money.attempt":
+            if d.get("kind") == "deposit":  # seeding, never an attacker's move
+                continue
             internal = d.get("payee_id") in own
             s["money"].append({"at": e["created_at"], "kind": d.get("kind"), "amount_cents": int(d.get("amount_cents") or 0),
                                "payer_id": d.get("payer_id"), "payee_id": d.get("payee_id"),
@@ -124,7 +128,10 @@ def sessions(events: list[dict]) -> list[dict]:
         elif t == "contact.changed":
             s["contact_changes"].append({"at": e["created_at"], "fields": d.get("fields") or [],
                                          "changes": d.get("changes") or {}, "source": d.get("source", "profile")})
-    return [out[k] for k in order]
+    # A session that never signed in and did nothing (e.g. the sign-up that created the persona)
+    # isn't behaviour; drop it.
+    return [out[k] for k in order if out[k]["login_at"] or out[k]["money"] or out[k]["declines"]
+            or out[k]["contact_changes"] or out[k]["reads"]]
 
 
 def _fingerprint_ops(s: dict, own: set[str]) -> str:
@@ -160,10 +167,14 @@ def analyse(events: list[dict], limit_cents: int = LIMIT_DEFAULT) -> dict:
     session if there is one (the scammer), else the decoy agent's own compliance run."""
     own = _own_accounts(events)
     sess = sessions(events)
-    external = [s for s in sess if s["actor"] != "agent"]
+    external = [s for s in sess if s["actor"] == "external"]
     subject = (external or sess or [None])[0]
-    pw_attempts = [e for e in events if e["type"] in ("login.password_ok", "login.failed")
-                   and (e["data"] or {}).get("actor", "external") != "agent"]
+    # Outside password attempts that did NOT become one of the sessions above: failed guesses, plus
+    # correct passwords that never cleared the one-time code.
+    ext_ok = [e for e in events if e["type"] == "login.password_ok" and (e["data"] or {}).get("actor", "external") == "external"]
+    failed = [e for e in events if e["type"] == "login.failed"]
+    matched = sum(1 for s_ in external if s_["password_ok_at"])
+    pw_attempts = failed + ext_ok[: max(0, len(ext_ok) - matched)]
 
     if subject is None:
         return {"subject": None, "sessions": [], "third_party": False, "stages": [], "metrics": {},

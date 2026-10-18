@@ -11,7 +11,7 @@ from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 
 import re
 
-from . import classifier, db, daytona_runner, indicators, outcome, personas, scam_lab
+from . import classifier, db, daytona_runner, indicators, intel, memory, outcome, personas, playbook, scam_lab
 from .config import settings
 from .gmail_client import Gmail
 from .nessie import NessieAdmin, logged as nessie_logged
@@ -32,11 +32,24 @@ async def startup():
     s.require("nessie_api_key")
     app.state.webhook_id = None
     app.state.webhook_secret = ""
+    app.state.decision_hook_id = None
     app.state.poller = None
     app.state.nessie = nessie_logged(s, "system")
+    _resume_pending_detonations()
 
     # A public (tunnel) URL lets Nessie push webhooks here; otherwise poll the /events feed.
     if s.public_url and _is_public(s.public_url):
+        await _drop_stale_hooks()
+        # Bank-wide screening: Nessie asks us before any transfer settles, and a transfer from an
+        # ordinary customer to a mule the honeypot identified is declined before the money moves.
+        if s.watchlist_block:
+            try:
+                dh = await app.state.nessie.create_decision_hook(
+                    f"{s.public_url}/api/webhooks/nessie-decision", kinds=["transfer"], max_wait=20)
+                app.state.decision_hook_id = dh.get("id")
+                print(f"[orchestrator] decision hook registered -> {s.public_url}/api/webhooks/nessie-decision")
+            except Exception as e:
+                print(f"[orchestrator] decision hook registration failed ({e}); the poller will cancel watchlist hits instead")
         try:
             wh = await app.state.nessie.create_webhook(
                 f"{s.public_url}/api/webhooks/nessie",
@@ -51,13 +64,29 @@ async def startup():
     print("[orchestrator] polling GET /events for money-movement")
 
 
+async def _drop_stale_hooks():
+    """Hooks a previous run left behind (crash, SIGKILL) would keep pointing at us; one decision hook
+    per kind is allowed, so clear ours before registering again."""
+    try:
+        for wh in await app.state.nessie.list_webhooks():
+            url = wh.get("url") or ""
+            if url.startswith(s.public_url + "/api/webhooks/") and wh.get("id"):
+                await app.state.nessie.delete_webhook(wh["id"])
+    except Exception as e:
+        print(f"[orchestrator] couldn't list/clean webhooks: {e}")
+
+
 @app.on_event("shutdown")
 async def shutdown():
     if app.state.poller:
         app.state.poller.cancel()
     if app.state.nessie:
-        if app.state.webhook_id:
-            await app.state.nessie.delete_webhook(app.state.webhook_id)
+        for hid in (app.state.webhook_id, getattr(app.state, "decision_hook_id", None)):
+            if hid:
+                try:
+                    await app.state.nessie.delete_webhook(hid)
+                except Exception:
+                    pass
         await app.state.nessie.aclose()
 
 
@@ -97,6 +126,17 @@ def _ingest_nessie_event(env: dict) -> None:
     # the same tx_id already records it, so ingesting these would add empty "deposit" rows.
     if env.get("type") == "account.balance_changed" or not isinstance((env.get("data") or {}).get("transaction"), dict):
         return
+    # A watchlisted transfer's later fate (declined by our hook, or settled because something slipped
+    # through) updates its interdiction row before the per-transaction dedupe below drops the event.
+    _tx = (env.get("data") or {}).get("transaction") or {}
+    _tid = env.get("tx_id") or _tx.get("id")
+    if _tid and env.get("type") in ("transaction.declined", "transaction.completed", "transaction.cancelled"):
+        row = db.interdiction_for_tx(s.db_path, _tid)
+        if row and row["action"] in ("flagged", "declined", "cancelled"):
+            final = {"transaction.declined": "declined", "transaction.cancelled": "cancelled",
+                     "transaction.completed": "settled"}[env["type"]]
+            if final != row["action"]:
+                db.update_interdiction(s.db_path, row["id"], action=final)
     # Dedupe by transaction id when present, so the created + settled events for one transaction
     # (different event ids, same tx_id) are counted once.
     ev_id = env.get("tx_id") or env.get("id") or env.get("seq")
@@ -114,7 +154,13 @@ def _ingest_nessie_event(env: dict) -> None:
     for cand in (account_id, txn.get("payer_id"), txn.get("payee_id")):
         eid = eid or (db.find_engagement_by_account(s.db_path, cand) if cand else None)
     if not eid:
+        # Not a decoy's money. Still screen it: an ordinary customer paying a known mule is exactly
+        # what the honeypot's intel exists to stop.
+        if kind == "transfer" and txn.get("status") in (None, "pending") and s.watchlist_block:
+            asyncio.get_event_loop().create_task(_screen_from_feed({**txn, "id": txn.get("id") or env.get("tx_id")}))
         return
+    if kind == "transfer" and txn.get("payee_id"):
+        intel.note_known_mule(s.db_path, eid, txn["payee_id"])
     etype = f"{kind}.created" if kind in ("transfer", "deposit", "withdrawal") else env.get("type", "event")
     db.add_event(s.db_path, eid, "nessie", etype, {
         "tx_id": env.get("tx_id") or txn.get("id"), "account_id": account_id, "kind": kind, "status": txn.get("status"),
@@ -122,6 +168,64 @@ def _ingest_nessie_event(env: dict) -> None:
         "payee_id": txn.get("payee_id"), "description": txn.get("description", ""),
     })
     indicators.recompute_and_store(s.db_path, eid)
+    # A transfer that lands AFTER the verdict (webhook lag) must flip it: a decoy that lost money was
+    # never "safe". Pending runs are left alone — _detonate is still waiting on the ledger for them.
+    if kind in ("transfer", "withdrawal"):
+        msg = db.message_for_engagement(s.db_path, eid)
+        if msg and msg.get("verdict") in ("safe", "error"):
+            v = _record_verdict(eid, msg["id"])
+            if v["verdict"] != msg["verdict"]:
+                print(f"[orchestrator] late ledger event flipped {eid}: {msg['verdict']} -> {v['verdict']}")
+
+
+async def _screen_from_feed(txn: dict) -> None:
+    """Poller-side screening (no public URL, so no decision hook): a watchlisted payee gets the
+    transfer cancelled inside Nessie's pending window; if that's too late, it's flagged."""
+    hit = intel.screen(s.db_path, txn)
+    if not hit or not txn.get("id") or db.interdiction_for_tx(s.db_path, txn["id"]):
+        return
+    reason = f"payee is a {hit['role']} account identified by honeypot engagement {hit['engagement_id']}"
+    action = "flagged"
+    if getattr(app.state, "decision_hook_id", None):
+        # Our hook owns the decision, so decide out of band now instead of waiting for Nessie's
+        # settlement sweep to call us (on the hosted API that can take a minute).
+        try:
+            await app.state.nessie.decide_transaction(txn["id"], "decline", reason)
+            action = "declined"
+        except Exception as e:
+            print(f"[orchestrator] couldn't decline {txn['id']}: {e}")
+    else:
+        try:
+            await app.state.nessie.cancel_transaction(txn["id"])
+            action = "cancelled"
+        except Exception as e:
+            print(f"[orchestrator] couldn't cancel {txn['id']}: {e}")
+    intel.record_hit(s.db_path, txn, hit, action, "feed")
+
+
+@app.post("/webhooks/nessie-decision")
+async def nessie_decision(request: Request):
+    """Nessie's decision hook: called while a transfer is pending; our answer is what happens.
+    Decoys are approved (letting the scammer drain them is how we learn); anyone else sending to a
+    watchlisted mule is declined with the engagement that identified it as the reason."""
+    import json as _json
+    body = _json.loads(await request.body() or b"{}")
+    txn = dict(body.get("transaction") or {})
+    if not txn.get("payer_id") and txn.get("id"):
+        try:
+            txn = {**(await app.state.nessie.get_transaction(txn["id"])), **txn}
+        except Exception:
+            pass
+    hit = intel.screen(s.db_path, txn)
+    if not hit:
+        return {"decision": "approve"}
+    row = db.interdiction_for_tx(s.db_path, txn.get("id") or "") if txn.get("id") else None
+    if row:  # the feed already caught (and decided) this one; answer the same way, once
+        if row["action"] != "declined":
+            db.update_interdiction(s.db_path, row["id"], action="declined", source="decision_hook")
+        return {"decision": "decline", "reason": (row["reason"] or "")[:200]}
+    row = intel.record_hit(s.db_path, txn, hit, "declined", "decision_hook")
+    return {"decision": "decline", "reason": row["reason"][:200]}
 
 
 @app.get("/health")
@@ -155,12 +259,25 @@ def get_engagement(eid: str):
     eng = db.get_engagement(s.db_path, eid)
     if not eng:
         raise HTTPException(404, "engagement not found")
+    events = db.list_events(s.db_path, eid)
+    created = next((e["data"] for e in events if e["type"] == "persona.created"), {})
+    persona = db.get_persona(s.db_path, created["persona_id"]) if created.get("persona_id") else None
+    otp = db.latest_otp_for_persona(s.db_path, persona["id"]) if persona else None
     return {
         "engagement": eng,
-        "events": db.list_events(s.db_path, eid),
+        "events": events,
         "emails": db.list_emails(s.db_path, eid),
         "shots": db.list_shots(s.db_path, eid),
         "indicators": indicators.compute(s.db_path, eid),
+        "playbook": playbook.analyse(events, s.transfer_limit_cents),
+        "related": intel.related(s.db_path, eid, s.transfer_limit_cents),
+        "interdictions": [i for i in db.list_interdictions(s.db_path) if i.get("engagement_id") == eid],
+        # Dashboard-only: the decoy's live credentials and latest one-time code, so a presenter can
+        # play the returning scammer from a second browser. Nothing here is real.
+        "decoy": {"username": persona["username"], "password": persona["password"], "email": persona["email"],
+                  "otp": otp["code"] if otp else None, "bank_url": (s.public_url or s.local_bank_url).rstrip("/") + "/"}
+        if persona else None,
+        "limit_cents": s.transfer_limit_cents,
     }
 
 
@@ -214,25 +331,70 @@ async def vet_email(sender: str, subject: str, text: str, gmail_id: str | None =
     return {"verdict": "pending", "action": "held", "engagement_id": eid, "message_id": msg_id}
 
 
+def _resume_pending_detonations() -> int:
+    """Detonations are in-process tasks, so a restart mid-run used to strand their emails as
+    'pending' forever. Re-queue every message still awaiting a verdict; _detonate skips the steps
+    the previous process already finished."""
+    n = 0
+    with db.connect(s.db_path) as c:
+        rows = c.execute("SELECT id, engagement_id, sender, subject, body FROM messages "
+                         "WHERE verdict = 'pending' AND engagement_id IS NOT NULL ORDER BY id").fetchall()
+    for r in rows:
+        msg_id, eid, sender, subject, body = r[0], r[1], r[2] or "", r[3] or "", r[4] or ""
+        db.add_event(s.db_path, eid, "system", "detonation.resumed",
+                     {"note": "orchestrator restarted mid-run; picking up where it stopped"})
+        asyncio.create_task(_detonate(eid, msg_id, sender, subject, body))
+        n += 1
+    if n:
+        print(f"[orchestrator] resumed {n} detonation(s) left pending by the previous run")
+    return n
+
+
 async def _detonate(eid: str, msg_id: int, sender: str, subject: str, text: str) -> None:
     global _detonations
     _detonations = _detonations or asyncio.Semaphore(max(1, s.max_detonations))
     async with _detonations:
         try:
-            plan = await asyncio.to_thread(classifier.extract, s, sender, subject, text)
-            db.add_event(s.db_path, eid, "gmail", "email.extracted", plan)
-            link = (plan.get("links") or [None])[0] or _first_url(text)
-            if link:
-                db.add_event(s.db_path, eid, "gmail", "portal.detected", {"url": link})
-            await personas.create_persona(s, eid)
+            # A detonation resumed after an orchestrator restart picks up where it stopped.
+            done = {e["type"] for e in db.list_events(s.db_path, eid)}
+            if "email.extracted" not in done:
+                plan = await asyncio.to_thread(classifier.extract, s, sender, subject, text)
+                db.add_event(s.db_path, eid, "gmail", "email.extracted", plan)
+                link = (plan.get("links") or [None])[0] or _first_url(text)
+                if link:
+                    db.add_event(s.db_path, eid, "gmail", "portal.detected", {"url": link})
+            if "persona.created" not in done:
+                await personas.create_persona(s, eid)
             await daytona_runner.run(s, eid)
-            # Transfers reach us through Nessie's webhook/poller a moment after the agent clicks Send.
-            await asyncio.sleep(s.verdict_grace_seconds)
         except Exception as e:
             print(f"[orchestrator] detonation {eid} failed: {e}")
             db.add_event(s.db_path, eid, "system", "agent.error", {"error": str(e)[:300]})
-        await _reconcile_outflows(eid)
+        await _await_ledger(eid)
         _record_verdict(eid, msg_id)
+
+
+async def _await_ledger(eid: str) -> None:
+    """Don't judge until the ledger has caught up with what the decoy did. Nessie's transfer events
+    reach us by webhook/poller, and have trailed the agent's POST by 40s+; a verdict decided in that
+    gap called a drained account "safe". So: give every run a short grace period, and if the proxy saw
+    the decoy submit money the ledger hasn't recorded, keep re-reading the ledger until it does (or
+    LEDGER_CONFIRM_SECONDS runs out, in which case outcome.decide holds the email for review)."""
+    loop = asyncio.get_running_loop()
+    t0 = loop.time()
+    deadline = t0 + max(s.verdict_grace_seconds, s.ledger_confirm_seconds)
+    await asyncio.sleep(min(2.0, s.verdict_grace_seconds))
+    while True:
+        await _reconcile_outflows(eid)
+        events = db.list_events(s.db_path, eid)
+        pending = outcome.submitted_unconfirmed(events)
+        if not pending:
+            if outcome.evidence(s.db_path, eid) or loop.time() - t0 >= s.verdict_grace_seconds:
+                return
+        elif loop.time() >= deadline:
+            db.add_event(s.db_path, eid, "system", "ledger.unconfirmed",
+                         {"submitted": pending, "waited_s": round(loop.time() - t0, 1)})
+            return
+        await asyncio.sleep(3)
 
 
 async def _reconcile_outflows(eid: str) -> int:
@@ -253,6 +415,7 @@ async def _reconcile_outflows(eid: str) -> int:
                 txns = await nessie.list_transactions(acct)
             except Exception as ex:
                 print(f"[orchestrator] reconcile: couldn't read {acct}: {ex}")
+                db.add_event(s.db_path, eid, "system", "ledger.read_failed", {"account": acct, "error": str(ex)[:200]})
                 continue
             for txn in txns:
                 if (txn.get("kind") or "").lower() not in ("transfer", "withdrawal") or txn.get("payer_id") != acct:
@@ -272,13 +435,27 @@ def _record_verdict(eid: str, msg_id: int) -> dict:
     v = outcome.decide(s.db_path, eid)
     action = {"scam": "quarantined", "safe": "delivered"}.get(v["verdict"], "review")
     db.add_event(s.db_path, eid, "system", "verdict", v)
+    grade = v.get("grade")
     db.update_message(s.db_path, msg_id, verdict=v["verdict"], vector=v["vector"], reason=v["reason"],
-                      action=action, confidence=1.0 if v["verdict"] != "error" else None)
-    ind = indicators.recompute_and_store(s.db_path, eid)
-    db.update_engagement(s.db_path, eid, summary=v["reason"][:300], status={
-        "scam": "drained" if "full_drain" in ind["tags"] else "compromised",
-        "safe": "cleared"}.get(v["verdict"], "inconclusive"))
+                      action=action, grade=grade,
+                      confidence={"confirmed": 1.0, "likely": 0.8}.get(grade, 1.0 if v["verdict"] == "safe" else None))
+    indicators.recompute_and_store(s.db_path, eid)
+    # A scam engagement stays ARMED: the decoy's credentials are in the scammer's hands and the account
+    # stays live, so when they come back and use them the canary fires and the verdict is confirmed.
+    status = {"scam": "confirmed" if grade == "confirmed" else "armed", "safe": "cleared"}.get(v["verdict"], "inconclusive")
+    db.update_engagement(s.db_path, eid, summary=v["reason"][:300], status=status, grade=grade,
+                         armed=1 if v["verdict"] == "scam" else 0)
     return v
+
+
+def _confirm(eid: str, why: dict) -> None:
+    """The canary fired: re-judge so the verdict, message and status all read 'confirmed'."""
+    msg = db.message_for_engagement(s.db_path, eid)
+    if msg:
+        _record_verdict(eid, msg["id"])
+    else:
+        v = outcome.decide(s.db_path, eid)
+        db.update_engagement(s.db_path, eid, status="confirmed", grade=v.get("grade"), summary=v["reason"][:300])
 
 
 @app.post("/engagements/{eid}/rejudge")
@@ -442,6 +619,72 @@ def nessie_calls(scope: str | None = None, after: int = 0, limit: int = 200):
             "stats": db.nessie_call_stats(s.db_path, scope)}
 
 
+# --- intel: what the honeypot gives back to the bank -------------------------
+
+@app.get("/intel/watchlist")
+def intel_watchlist():
+    """The mule watchlist (every account a scam sent money to, plus their downstream layer) and the
+    bank-wide interdictions it has produced."""
+    wl = sorted(intel.watchlist(s.db_path).values(), key=lambda w: w["first_seen"], reverse=True)
+    return {"watchlist": wl, "interdictions": db.list_interdictions(s.db_path),
+            "screening": "decision_hook" if getattr(app.state, "decision_hook_id", None) else
+                         ("poller" if s.watchlist_block else "off")}
+
+
+@app.get("/intel/memory")
+def intel_memory():
+    """Scam memory: a dossier for every scam ever detonated plus the patterns shared across them
+    (lure themes, sender domains, phishing hosts, mule accounts, playbook fingerprints)."""
+    return memory.build(s.db_path, s.transfer_limit_cents)
+
+
+@app.get("/intel/crews")
+def intel_crews():
+    """Engagements linked into crews: same mule, same source address, same playbook fingerprint."""
+    return {"crews": intel.crews(s.db_path, s.transfer_limit_cents)}
+
+
+@app.get("/engagements/{eid}/flow")
+async def engagement_flow(eid: str):
+    """Follow the money past the mule: decoy → mule → layer → cash, read live from Nessie."""
+    if not db.get_engagement(s.db_path, eid):
+        raise HTTPException(404, "engagement not found")
+    return await intel.flow(s, eid)
+
+
+@app.post("/sim/launder/{eid}")
+async def sim_launder(eid: str, background: BackgroundTasks):
+    """Demo: the mule fans the stolen money out to a fresh layer and one account cashes out.
+    Simulated downstream behaviour, on real Nessie transactions, so the feed sees the network.
+    Runs in the background (settlement on the hosted API takes up to a minute per hop); the
+    engagement's timeline gets mule.network as soon as the fan-out is posted and mule.cashout later."""
+    if not db.get_engagement(s.db_path, eid):
+        raise HTTPException(404, "engagement not found")
+    if not intel.mules_of(s.db_path, eid):
+        raise HTTPException(409, "this engagement has no mule yet (nothing left the decoy)")
+    if db.has_event(s.db_path, eid, "mule.network"):
+        raise HTTPException(409, "already laundered once for this engagement")
+
+    async def task():
+        try:
+            await intel.launder(s, eid, s.transfer_limit_cents)
+        except Exception as e:
+            db.add_event(s.db_path, eid, "system", "mule.launder_error", {"error": str(e)[:300]})
+    background.add_task(task)
+    return {"started": True, "engagement_id": eid}
+
+
+@app.post("/sim/customer-pays-mule")
+async def sim_customer_pays_mule(body: dict | None = None):
+    """Demo: an ordinary customer tries to pay a watchlisted mule. The decision hook (or the poller's
+    cancel) stops it, attributed to the engagement that found the mule."""
+    body = body or {}
+    try:
+        return await intel.customer_pays_mule(s, body.get("mule"), int(body.get("amount_cents") or 125000), s.internal_secret)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
 # --- internal API (called by the proxy; shared-secret guarded) -------------
 
 def _check_internal(secret: str | None):
@@ -471,7 +714,8 @@ async def internal_send_otp(body: dict, x_internal_secret: str = Header(None)):
     except Exception as e:
         print(f"[orchestrator] OTP email failed ({e}); code still retrievable via /internal/otp")
     db.add_event(s.db_path, persona["engagement_id"], "system", "otp.sent",
-                 {"emailed": emailed, "to": persona["email"]})
+                 {"emailed": emailed, "to": persona["email"], "actor": body.get("actor", "external"),
+                  "ip": body.get("ip"), "ua": body.get("ua")})
     return {"ok": True}
 
 
@@ -504,7 +748,17 @@ async def internal_event(body: dict, x_internal_secret: str = Header(None)):
     eid = persona["engagement_id"] if persona else body.get("engagement_id")
     if not eid:
         return {"ok": False}
-    db.add_event(s.db_path, eid, body.get("source", "proxy"), body["type"], body.get("data", {}))
+    data = body.get("data") or {}
+    db.add_event(s.db_path, eid, body.get("source", "proxy"), body["type"], data)
+    # The canary. The decoy agent marks its own sign-ins; anyone else presenting the decoy's password
+    # can only have got it from the phishing — that is the scammer, back to collect.
+    if body["type"] in ("login.password_ok", "session.login") and data.get("actor", "external") == "external":
+        stage = "session" if body["type"] == "session.login" else "password"
+        key = {"sid": data.get("sid")} if stage == "session" else {"ip": data.get("ip"), "stage": "password"}
+        if not db.has_event(s.db_path, eid, "credential.used_by_third_party", **{k: v for k, v in key.items() if v}):
+            db.add_event(s.db_path, eid, "system", "credential.used_by_third_party",
+                         {"stage": stage, "sid": data.get("sid"), "ip": data.get("ip"), "ua": data.get("ua")})
+            _confirm(eid, data)
     indicators.recompute_and_store(s.db_path, eid)
     return {"ok": True}
 
@@ -537,7 +791,7 @@ async def internal_proxy_log(body: dict, x_internal_secret: str = Header(None)):
         eid = p["engagement_id"] if p else None
     if eid:
         db.add_event(s.db_path, eid, "proxy", "request",
-                     {k: body.get(k) for k in ("method", "path", "status", "ip", "ua")})
+                     {k: body.get(k) for k in ("method", "path", "status", "ip", "ua", "actor", "sid")})
     return {"ok": True}
 
 
@@ -553,9 +807,15 @@ async def nessie_webhook(request: Request):
     if secret:
         import hashlib
         import hmac
-        sig = request.headers.get("X-Nessie-Signature", "")
-        if sig and not hmac.compare_digest(sig, hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()):
-            print("[orchestrator] webhook signature mismatch (ingesting anyway)")
+        # v2 signs as "Nessie-Signature: t=<unix>,v1=<hex hmac-sha256 over 't.body'>".
+        sig = request.headers.get("Nessie-Signature") or request.headers.get("X-Nessie-Signature", "")
+        try:
+            parts = dict(p.split("=", 1) for p in sig.split(",")) if "=" in sig else {}
+            expected = hmac.new(secret.encode(), f"{parts.get('t', '')}.".encode() + raw, hashlib.sha256).hexdigest()
+            if sig and not hmac.compare_digest(expected, parts.get("v1", "")):
+                print("[orchestrator] webhook signature mismatch (ingesting anyway)")
+        except ValueError:
+            pass
     import json as _json
     _ingest_nessie_event(_json.loads(raw or b"{}"))
     return {"ok": True}

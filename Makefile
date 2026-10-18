@@ -6,7 +6,7 @@ start demo:
 
 # Free the dev ports if a run got stuck.
 stop:
-	-@lsof -ti tcp:3000 tcp:8000 tcp:8001 tcp:9000 | xargs kill 2>/dev/null || true
+	-@lsof -t -i tcp:3000 -i tcp:8000 -i tcp:8001 -i tcp:9000 | xargs kill 2>/dev/null || true
 	@echo "stopped"
 
 test:

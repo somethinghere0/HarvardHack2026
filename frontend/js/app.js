@@ -30,7 +30,7 @@ function shell(active, ...content) {
   document.body.classList.remove("landing");
   document.body.classList.add("portal");
   return [
-    olbHeader({ badge: badge(), onHome: () => go("dashboard"), onLogout: logout }),
+    olbHeader({ badge: badge(), onHome: () => go("dashboard"), onLogout: logout, onProfile: () => go("profile") }),
     olbTabs(active, go),
     h("main", { class: "olb-main" }, h("div", { class: "olb-wrap" }, ...content)),
     olbFooter(),
@@ -212,7 +212,7 @@ async function dashboardView() {
     h("div", { class: "olb-greet" },
       h("h1", {}, name,
         h("span", { class: "greet-links" },
-          h("a", { href: "#", onClick: fakeLink }, "Update Profile"), h("span", { class: "bar" }, "|"),
+          h("a", { href: "#", onClick: nav("profile") }, "Update Profile"), h("span", { class: "bar" }, "|"),
           h("a", { href: "#", onClick: fakeLink }, "Security Center"))),
       rewardsBlurb(since)),
     h("div", { class: "olb-two" }, left, activityCenter(go))));
@@ -355,8 +355,66 @@ async function transferView(preselectFrom) {
   }
   render(...formPage("transfer", "Transfer money", form, [
     h("section", { class: "panel side-panel" }, h("h3", {}, "Scheduled transfers"), h("p", {}, "You have no scheduled transfers. Your money is staying put, which is more than we can say for most people’s.")),
-    h("section", { class: "panel side-panel" }, h("h3", {}, "Transfer limits"), h("p", {}, "Daily limit: your balance. Monthly limit: also your balance."), h("p", {}, "Need to move more? You’ll need more.")),
+    h("section", { class: "panel side-panel" }, h("h3", {}, "Transfer limits"), h("p", {}, "Per transfer: $5,000.00. Daily limit: your balance. Monthly limit: also your balance."), h("p", {}, "Need to move more than $5,000 at once? Make more than one transfer, or visit a branch and explain yourself.")),
   ]));
+}
+
+// --- profile & settings ---------------------------------------------------
+
+async function profileView() {
+  render(...shell("dashboard", spinner("Loading your profile")));
+  let customer, profile;
+  try {
+    [customer, profile] = await Promise.all([api().customer(), api().profile()]);
+  } catch (e) {
+    return render(...shell("dashboard", crumb(), alertBox(e.message), retry(profileView)));
+  }
+  const err1 = h("div"), err2 = h("div");
+  const contact = h("form", { class: "form-panel", onSubmit: saveContact },
+    h("h3", { class: "form-title" }, "Contact information"),
+    field("Email address", h("input", { name: "email", type: "email", value: profile.email || "", autocomplete: "email", required: true }),
+      "Verification codes and account alerts are sent here."),
+    field("Mobile phone", h("input", { name: "phone", type: "tel", value: profile.phone || "", autocomplete: "tel", placeholder: "(555) 555-0100" })),
+    err1,
+    h("div", { class: "form-actions" },
+      h("button", { class: "btn btn-primary", type: "submit" }, "Save changes"),
+      h("button", { class: "btn btn-ghost", type: "button", onClick: () => go("dashboard") }, "Cancel")),
+    note("Changing your email moves where we send one-time codes. We will not ask whether that was a good idea."));
+  const a = customer.address || {};
+  const address = h("form", { class: "form-panel", onSubmit: saveAddress },
+    h("h3", { class: "form-title" }, "Mailing address"),
+    h("div", { class: "row" },
+      field("Street number", h("input", { name: "street_number", value: a.street_number || "", required: true })),
+      field("Street name", h("input", { name: "street_name", value: a.street_name || "", autocomplete: "address-line1", required: true }))),
+    h("div", { class: "row" },
+      field("City", h("input", { name: "city", value: a.city || "", autocomplete: "address-level2", required: true })),
+      field("State", h("input", { name: "state", value: a.state || "", maxlength: 2, required: true, style: "text-transform:uppercase" })),
+      field("ZIP", h("input", { name: "zip", value: a.zip || "", inputmode: "numeric", pattern: "[0-9]{5}", required: true }))),
+    err2,
+    h("div", { class: "form-actions" }, h("button", { class: "btn btn-secondary", type: "submit" }, "Update address")));
+
+  async function saveContact(e) {
+    e.preventDefault();
+    const f = formData(contact);
+    await busy(contact, err1, async () => {
+      const r = await api().updateProfile({ email: f.email.trim(), phone: f.phone.trim() });
+      toast((r.changed || []).length ? "Contact information updated" : "Nothing to change");
+    });
+  }
+  async function saveAddress(e) {
+    e.preventDefault();
+    const f = formData(address);
+    await busy(address, err2, async () => {
+      await api().updateCustomer({ address: { street_number: f.street_number, street_name: f.street_name, city: f.city,
+        state: f.state.toUpperCase(), zip: f.zip } });
+      toast("Address updated");
+    });
+  }
+  render(...shell("dashboard", crumb(), h("h1", { class: "olb-page-title" }, "Profile & Settings"),
+    h("div", { class: "olb-two" }, h("div", {}, contact, address),
+      h("aside", { class: "olb-side" },
+        h("section", { class: "panel side-panel" }, h("h3", {}, "Signed in as"), h("p", { class: "mono" }, profile.username || session.get()?.username || "")),
+        h("section", { class: "panel side-panel" }, h("h3", {}, "Security"), h("p", {}, "Two-step verification: on. Codes go to the email above, whoever controls it."))))));
 }
 
 async function depositView(preselect) {
@@ -435,7 +493,7 @@ async function logout() {
 
 const routes = {
   login: loginView, signup: signupView, dashboard: dashboardView, account: accountView,
-  transfer: transferView, deposit: depositView, open: openAccountView,
+  transfer: transferView, deposit: depositView, open: openAccountView, profile: profileView,
 };
 
 function go(route, arg) {

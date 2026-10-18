@@ -24,6 +24,9 @@ from app.gmail_client import Gmail  # noqa: E402
 
 POLL_SECONDS = int(os.environ.get("WATCH_POLL_SECONDS", "10"))
 WATCH_LIMIT = int(os.environ.get("WATCH_LIMIT", "25"))
+# After labelling, keep checking a message's verdict this long: a transfer the ledger records late
+# flips a "safe" to "scam" after the fact, and the label has to follow it.
+RELABEL_SECONDS = int(os.environ.get("WATCH_RELABEL_SECONDS", "900"))
 
 
 def _is_our_mail(s, m: dict) -> bool:
@@ -56,8 +59,22 @@ def _hide_internal(gmail, s, m: dict) -> None:
         print(f"[watcher] couldn't hide internal mail '{subj}': {type(e).__name__}: {e}")
 
 
-def _act(gmail, s, m: dict, v: dict) -> None:
+def _label_for(s, verdict: str) -> str | None:
+    return {"scam": s.gmail_quarantine_label, "safe": s.gmail_safe_label or None}.get(verdict)
+
+
+def _act(gmail, s, m: dict, v: dict, previous: str | None = None) -> None:
+    """Label a message for its verdict. With `previous` (a verdict already acted on), this is a flip:
+    the old label comes off first, so a "safe" the ledger later proved wrong doesn't stay marked safe."""
     subj = m.get("subject", "")[:50]
+    old = _label_for(s, previous) if previous else None
+    if old and old != _label_for(s, v["verdict"]):
+        try:
+            removed = gmail.remove_label(m.get("gmail_id", ""), old)
+        except Exception as e:
+            removed = False
+            print(f"[watcher] couldn't remove {old} from '{subj}': {type(e).__name__}: {e}")
+        print(f"[flip] {subj}: {previous} -> {v['verdict']} ({old} {'removed' if removed else 'NOT removed'})")
     if v["verdict"] == "scam":
         gmail.apply_label(m["uid"], s.gmail_quarantine_label, m["folder"])
         if s.gmail_archive_scams:
@@ -89,6 +106,7 @@ def main() -> None:
           f"{' incl. backfill' if backfill else f' after uid {since_uid}'})")
     empty_polls = 0
     pending: dict[str, dict] = {}  # gmail_id -> message, still detonating
+    judged: dict[str, tuple[dict, str, float]] = {}  # gmail_id -> (message, verdict acted on, when)
     while True:
         try:
             batch = gmail.list_recent(s.gmail_source_label, limit=WATCH_LIMIT, since_uid=since_uid)
@@ -116,12 +134,23 @@ def main() -> None:
                     continue
                 pending[m["gmail_id"]] = m
                 print(f"[held] {m.get('subject','')[:50]} -> detonating in sandbox")
-            if pending:
-                done = httpx.post(f"{orch}/verdicts", json={"gmail_ids": list(pending)}, timeout=15).json()
+            now = time.time()
+            for gid in [g for g, (_, _, at) in judged.items() if now - at > RELABEL_SECONDS]:
+                judged.pop(gid)
+            if pending or judged:
+                done = httpx.post(f"{orch}/verdicts", json={"gmail_ids": list(pending) + list(judged)},
+                                  timeout=15).json()
                 for gid, v in (done.get("verdicts") or {}).items():
-                    if v.get("verdict") == "pending" or gid not in pending:
+                    if v.get("verdict") == "pending":
                         continue
-                    _act(gmail, s, pending.pop(gid), v)
+                    if gid in pending:
+                        m = pending.pop(gid)
+                        _act(gmail, s, m, v)
+                        judged[gid] = (m, v["verdict"], now)
+                    elif gid in judged and v["verdict"] != judged[gid][1]:
+                        m, prev, _ = judged[gid]
+                        _act(gmail, s, m, v, previous=prev)
+                        judged[gid] = (m, v["verdict"], now)
         except Exception as e:  # keep the loop alive
             print(f"[watcher] {type(e).__name__}: {e}")
         time.sleep(POLL_SECONDS)

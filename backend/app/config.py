@@ -32,6 +32,9 @@ class Settings:
     max_detonations: int = int(os.environ.get("MAX_DETONATIONS", "3"))
     # After the agent finishes, how long to wait for Nessie's transfer events to land before judging.
     verdict_grace_seconds: float = float(os.environ.get("VERDICT_GRACE_SECONDS", "8"))
+    # If the proxy saw the decoy submit a transfer, keep re-reading the ledger this long for Nessie to
+    # record it before judging (its transfer events have trailed the POST by 40s+).
+    ledger_confirm_seconds: float = float(os.environ.get("LEDGER_CONFIRM_SECONDS", "120"))
 
     # Nessie v2 (shared with the proxy).
     nessie_base_url: str = os.environ.get("NESSIE_BASE_URL", "https://v2-prod-api.nessieisreal.com").rstrip("/")

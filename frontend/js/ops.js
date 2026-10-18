@@ -67,7 +67,8 @@ function renderInbox() {
     const cls = { scam: "scam", safe: "safe", pending: "pending" }[verdict] || "review";
     return h("button", { class: `msg ${cls} ${isSel(row) ? "sel" : ""} ${first ? "enter" : ""}`,
       style: first ? `animation-delay:${Math.min(i, 20) * 25}ms` : null, onClick: () => open(row) },
-      h("span", { class: "vtag" }, verdict === "pending" ? "running" : verdict === "error" ? "review" : verdict),
+      h("span", { class: `vtag ${m?.grade || ""}` }, verdict === "pending" ? "running" : verdict === "error" ? "review"
+        : verdict === "scam" && m?.grade ? `scam·${m.grade}` : verdict),
       h("div", { style: "min-width:0" },
         h("div", { class: "msub" }, m?.subject || e?.subject || "(no subject)"),
         h("div", { class: "mfrom" }, (m?.sender || e?.scammer_email || "") + (m?.vector ? ` · ${m.vector}` : "")),
@@ -81,7 +82,8 @@ function renderInbox() {
 
 const msgClass = (m) => ({ scam: "scam", safe: "safe", pending: "pending" }[m.verdict] || "review");
 const _VERDICT = {
-  scam: ["⚠ scam", "quarantined. Following the email in the sandbox cost the decoy victim — that's the evidence."],
+  scam: ["⚠ scam · likely", "quarantined. Following the email in the sandbox cost the decoy victim. The decoy stays ARMED: if the scammer comes back and uses the phished credentials, this becomes confirmed."],
+  confirmed: ["⚠ scam · confirmed", "quarantined. The phished credentials were used by a third party (or the money went to a mule we'd already seen). Proof from outside the sandbox, not inference."],
   safe: ["✓ safe", "delivered. The decoy victim followed the email in the sandbox and lost nothing."],
   pending: ["◌ detonating", "held while a decoy victim follows the email in a sandbox."],
   error: ["? inconclusive", "the sandbox run didn't finish, so it's held for review instead of guessed."],
@@ -90,7 +92,7 @@ const _VERDICT = {
 function renderVerdict() {
   const m = messages.find((x) => x.id === selectedMsg);
   if (!m) return verdictEl.replaceChildren();
-  const [head, note] = _VERDICT[m.verdict] || _VERDICT.error;
+  const [head, note] = (m.verdict === "scam" && m.grade === "confirmed" ? _VERDICT.confirmed : _VERDICT[m.verdict]) || _VERDICT.error;
   verdictEl.replaceChildren(h("div", { class: `verdict ${msgClass(m)}` },
     h("div", { class: "vh" }, h("span", {}, `${head} · ${m.subject || "(no subject)"}`),
       m.vector ? h("span", {}, m.vector.replace(/_/g, " ")) : null),
@@ -114,6 +116,7 @@ async function refresh() {
   countEl.textContent = `${engagements.length} engagement${engagements.length === 1 ? "" : "s"}`;
   renderInbox();
   renderVerdict();
+  renderWatchlist().catch(() => {});
   if (selected) await renderDetail(selected).catch(() => {});
 }
 
@@ -137,7 +140,7 @@ function kv(label, value, mono) {
 async function renderDetail(id) {
   const d = await api(`/engagements/${id}`);
   if (id !== selected) return;
-  const sig = `${id}:${d.events.length}:${(d.shots || []).length}:${d.engagement.risk_score}:${d.emails.length}:${frame}:${inspect}:${story}`;
+  const sig = `${id}:${d.events.length}:${(d.shots || []).length}:${d.engagement.risk_score}:${d.emails.length}:${frame}:${inspect}:${story}:${d.engagement.status}:${d.decoy?.otp}:${(d.interdictions || []).length}:${(d.related?.others || []).length}`;
   if (sig === detailSig) return;
   detailSig = sig;
   const eng = d.engagement;
@@ -200,12 +203,183 @@ async function renderDetail(id) {
       stat("agent steps", String(steps)), stat("frames", String((d.shots || []).length))),
     buildStory(d),
     buildSandbox(d),
+    buildArmed(d),
+    buildPlaybook(d),
     h("div", { class: "d-grid" }, personaCard, indCard, timeline),
+    buildFlow(d),
     emails));
 
   const t2 = panelEl.querySelector(".sb-term");
   if (t2) t2.scrollTop = pinned ? t2.scrollHeight : term.scrollTop;  // follow the newest line unless the user scrolled up
 }
+
+// --- armed: the decoy stays live, waiting for the scammer to come back ------------
+
+const cardH = (title, ...body) => h("div", { class: "card" }, h("h3", { style: "font-size:13px;margin-bottom:12px" }, title), ...body);
+const short = (id) => String(id || "").slice(-6);
+
+function buildArmed(d) {
+  const eng = d.engagement, dec = d.decoy;
+  if (!dec || !["armed", "confirmed"].includes(eng.status)) return null;
+  const confirmed = eng.status === "confirmed";
+  const intruders = (d.playbook?.sessions || []).filter((s) => s.actor === "external");
+  const launderBtn = h("button", { class: "btn btn-light", onClick: async (e) => {
+    e.target.disabled = true; e.target.textContent = "laundering…";
+    try { await api(`/sim/launder/${eng.id}`, { method: "POST" }); e.target.textContent = "laundering · watch the terminal"; detailSig = ""; await renderDetail(eng.id); return; }
+    catch (err) { alert(err.message); } finally { e.target.disabled = false; e.target.textContent = "./simulate --launder"; }
+  } }, "./simulate --launder");
+  return h("div", { class: `armed ${confirmed ? "confirmed" : ""}` },
+    h("div", { class: "armed-head" },
+      h("span", { class: "armed-dot" }),
+      h("b", {}, confirmed ? "CONFIRMED · a third party used the phished credentials" : "ARMED · waiting for the scammer to come back"),
+      h("span", { class: "muted tiny" }, confirmed
+        ? `${intruders.length} intruder session(s) · the account stays live to keep collecting`
+        : "the decoy account stays live; any sign-in that isn't our agent's is the proof")),
+    h("div", { class: "armed-grid" },
+      h("div", {},
+        h("div", { class: "insp-k" }, "the phished credentials (what the scammer holds)"),
+        h("dl", { class: "kv" }, ...kv("Bank", dec.bank_url, true), ...kv("User ID", dec.username, true),
+          ...kv("Password", dec.password, true), ...kv("Latest OTP", dec.otp || "— (issued on sign-in; shows here)", true)),
+        h("p", { class: "muted tiny" }, "Play the returning scammer: open the bank in another browser or your phone, sign in with these, read the code here. In production this waits hours or days.")),
+      h("div", {},
+        h("div", { class: "insp-k" }, "intruder sessions"),
+        intruders.length ? h("table", { class: "dt" }, ...intruders.map((s) => h("tr", {},
+          h("td", { class: "mono" }, s.sid), h("td", {}, fmtTime(s.login_at || s.opened_at)), h("td", { class: "mono" }, s.ip || "?"),
+          h("td", {}, s.ua_family), h("td", {}, `${s.money.filter((m) => m.status === "accepted").length} moves · ${s.declines.length} refused`))))
+          : h("p", { class: "muted tiny" }, "none yet"),
+        h("div", { class: "insp-k", style: "margin-top:10px" }, "downstream"),
+        h("div", { class: "controls" }, launderBtn,
+          h("span", { class: "muted tiny" }, "the mule fans the money out to a fresh layer and cashes out — simulated, on real Nessie transactions")))));
+}
+
+// --- playbook: how the attacker operated --------------------------------------------
+
+function buildPlaybook(d) {
+  const pb = d.playbook;
+  if (!pb || !pb.subject) return null;
+  const m = pb.metrics || {};
+  const s = (v, unit = "") => (v == null ? "—" : `${v}${unit}`);
+  const stat = (k, v, sub) => h("div", { class: "stat" }, h("div", { class: "k" }, k), h("div", { class: "v" }, v), sub ? h("div", { class: "tiny muted" }, sub) : null);
+  const who = pb.third_party ? "the intruder" : "the decoy agent";
+  return h("div", { class: "card pb" },
+    h("div", { class: "eng-row" },
+      h("h3", { style: "font-size:13px" }, `Playbook · ${who} · session ${pb.subject}`),
+      pb.profile ? h("span", { class: `pill ${pb.third_party ? "danger" : ""}`, title: pb.profile.why }, pb.profile.label) : null),
+    h("p", { class: "tiny muted", style: "margin:4px 0 12px" }, pb.summary + (pb.profile ? ` · read: ${pb.profile.why}.` : "")),
+    h("div", { class: "pb-stages" }, ...pb.stages.map((st) => h("div", { class: `pb-stage ${st.done ? "done" : ""}` },
+      h("div", { class: "pb-title" }, h("span", { class: "pb-n" }, st.done ? "●" : "○"), st.title, st.at ? h("span", { class: "muted tiny" }, fmtTime(st.at)) : null),
+      ...st.lines.map((l) => h("div", { class: "pb-line" }, l))))),
+    h("div", { class: "stats pb-stats" },
+      stat("login → first move", s(m.secs_login_to_first_move, "s"), m.secs_login_to_first_move != null && m.secs_login_to_first_move < 15 ? "scripted-fast" : "human pace"),
+      stat("recon reads", s(m.recon_reads), "before touching money"),
+      stat("refused by limit", s(m.declined_attempts), `limit ${money((m.limit_cents || 0) / 100)}`),
+      stat("structured", m.structured ? "yes" : "no", m.internal_sweeps ? `${m.internal_sweeps} internal sweep(s)` : "no sweep"),
+      stat("lockout", m.lockout ? (m.lockout_first ? "first" : "after") : "no", "contact details changed"),
+      stat("fingerprint", pb.fingerprint?.hash || "—", `${pb.fingerprint?.ops || ""} · ${pb.fingerprint?.ua_family || ""}`)),
+    d.related?.others?.length ? h("div", { class: "pb-related" },
+      h("b", {}, `Crew ${d.related.crew}: `), `linked to ${d.related.others.length} other engagement(s) by ${d.related.why.join(", ")} — `,
+      ...d.related.others.map((o) => h("a", { href: "#", onClick: (e) => { e.preventDefault(); select(o); } }, o.slice(0, 8) + " "))) : null);
+}
+
+// --- money flow: follow it past the mule -------------------------------------------
+
+const _flowCache = {};
+function buildFlow(d) {
+  const eng = d.engagement;
+  const outflows = d.events.filter((e) => e.type === "transfer.created").length + d.events.filter((e) => e.type === "mule.network").length;
+  if (!outflows) return null;
+  const box = h("div", { class: "card" }, h("h3", { style: "font-size:13px;margin-bottom:6px" }, "Money flow · decoy → mule → layer → cash"),
+    h("p", { class: "tiny muted", style: "margin:0 0 10px" }, "Read live from Nessie. Past the mule, this is only visible because the whole sandbox is one bank — the view a consortium would have."));
+  const key = `${eng.id}:${outflows}`;
+  const draw = (f) => box.append(flowSvg(f));
+  if (_flowCache[key]) draw(_flowCache[key]);
+  else api(`/engagements/${eng.id}/flow`).then((f) => { _flowCache[key] = f; draw(f); }).catch(() => box.append(h("p", { class: "muted tiny" }, "flow unavailable")));
+  return box;
+}
+
+const NS = "http://www.w3.org/2000/svg";
+function sv(tag, attrs, ...kids) {
+  const el = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
+  for (const k of kids) el.append(k instanceof Node ? k : document.createTextNode(String(k)));
+  return el;
+}
+
+function flowSvg(f) {
+  const cols = { decoy: 0, mule: 1, layer: 2, cash: 3 };
+  const byCol = {};
+  for (const n of f.nodes) (byCol[cols[n.role] ?? 1] ||= []).push(n);
+  const W = 860, colW = 210, rowH = 54, pad = 20;
+  const rows = Math.max(1, ...Object.values(byCol).map((a) => a.length));
+  const H = pad * 2 + rows * rowH;
+  const pos = {};
+  for (const [c, list] of Object.entries(byCol)) list.forEach((n, i) => { pos[n.id] = { x: pad + c * colW + 70, y: pad + 20 + i * rowH + (rows - list.length) * rowH / 2 }; });
+  const color = { decoy: "var(--grn)", mule: "var(--red)", layer: "var(--amber)", cash: "var(--txt-dim)" };
+  const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, class: "flow" });
+  for (const e of f.edges) {
+    const a = pos[e.from], b = pos[e.to];
+    if (!a || !b) continue;
+    const mid = (a.x + b.x) / 2;
+    svg.append(sv("path", { d: `M${a.x + 60},${a.y} C${mid},${a.y} ${mid},${b.y} ${b.x - 60},${b.y}`,
+      class: `fe ${e.status || ""} ${e.by || ""}` }));
+    svg.append(sv("text", { x: mid, y: (a.y + b.y) / 2 - 6, class: "fl" }, `${money((e.amount_cents || 0) / 100)}${e.by ? " · " + (e.by === "agent" ? "agent" : "intruder") : ""}${e.status === "declined" ? " ✗" : ""}`));
+  }
+  for (const n of f.nodes) {
+    const p = pos[n.id];
+    if (!p) continue;
+    const g = sv("g", { transform: `translate(${p.x - 60},${p.y - 18})` });
+    g.append(sv("rect", { width: 120, height: 36, rx: 7, class: `fn ${n.role} ${n.watchlisted ? "wl" : ""}`, style: `stroke:${color[n.role] || "#888"}` }));
+    g.append(sv("text", { x: 60, y: 15, class: "fnt" }, n.role === "cash" ? "cash out" : `${n.role} · ${short(n.id)}`));
+    g.append(sv("text", { x: 60, y: 29, class: "fns" }, n.role === "cash" ? "" : `${n.type || ""} ${n.balance_cents != null ? money(n.balance_cents / 100) : ""}${n.watchlisted ? " · watchlisted" : ""}`));
+    svg.append(g);
+  }
+  return svg;
+}
+
+// --- bank-wide watchlist pane -----------------------------------------------------
+
+let wlSig = "";
+async function renderWatchlist() {
+  const el = document.getElementById("wl-body");
+  if (!el) return;
+  let d;
+  try { d = await api("/intel/watchlist"); } catch { return; }
+  const sig = JSON.stringify([d.watchlist.map((w) => w.account_id + w.grade), d.interdictions.map((i) => i.id), d.screening]);
+  if (sig === wlSig) return;
+  wlSig = sig;
+  document.getElementById("wl-mode").textContent = `screening: ${d.screening === "decision_hook" ? "nessie decision hook (declined before it settles)" : d.screening === "poller" ? "event poller (cancelled in the pending window)" : "off"}`;
+  const wl = d.watchlist.length ? h("table", { class: "dt" },
+    h("tr", {}, h("th", {}, "account"), h("th", {}, "role"), h("th", {}, "grade"), h("th", {}, "from engagement"), h("th", {}, "received")),
+    ...d.watchlist.map((w) => h("tr", {}, h("td", { class: "mono" }, short(w.account_id)), h("td", {}, w.role),
+      h("td", {}, h("span", { class: `pill ${w.grade === "confirmed" ? "danger" : ""}` }, w.grade)),
+      h("td", {}, h("a", { href: "#", onClick: (e) => { e.preventDefault(); select(w.engagement_id); } }, w.engagement_id.slice(0, 8))),
+      h("td", {}, money((w.received_cents || 0) / 100)))))
+    : h("p", { class: "muted tiny" }, "empty — run a scam through and its mule lands here");
+  const hits = d.interdictions.length ? h("table", { class: "dt" },
+    h("tr", {}, h("th", {}, "when"), h("th", {}, "customer → payee"), h("th", {}, "amount"), h("th", {}, "action"), h("th", {}, "why")),
+    ...d.interdictions.map((i) => h("tr", { class: "hit" }, h("td", {}, fmtTime(i.created_at)),
+      h("td", { class: "mono" }, `${short(i.payer_id)} → ${short(i.payee_id)}`), h("td", {}, money((i.amount_cents || 0) / 100)),
+      h("td", {}, h("span", { class: "pill danger" }, i.action)), h("td", { class: "tiny muted" }, i.reason || ""))))
+    : h("p", { class: "muted tiny" }, "no customer has tried to pay a watchlisted account yet");
+  el.replaceChildren(h("div", { class: "wl-cols" },
+    h("div", {}, h("div", { class: "insp-k" }, `mule watchlist · ${d.watchlist.length}`), wl),
+    h("div", {}, h("div", { class: "insp-k" }, `interdictions · ${d.interdictions.length}`), hits)));
+}
+
+document.getElementById("sim-pay")?.addEventListener("click", async (e) => {
+  const out = document.getElementById("wl-result");
+  e.target.disabled = true; e.target.textContent = "customer paying…";
+  out.textContent = "an ordinary customer is sending money to the most recent mule…";
+  try {
+    const r = await api("/sim/customer-pays-mule", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const act = r.interdiction?.action || r.status;
+    out.replaceChildren(h("span", { class: act === "declined" || act === "cancelled" ? "ok" : "er" },
+      `${r.customer?.name} → ${short(r.mule)} · ${money((r.amount_cents || 0) / 100)} · ${act.toUpperCase()}`),
+      h("span", { class: "muted" }, r.interdiction ? ` — ${r.interdiction.reason}` : r.decision_reason ? ` — ${r.decision_reason}` : r.error ? ` — ${r.error}` : " — still pending; the feed screens it within seconds"));
+    wlSig = ""; renderWatchlist();
+  } catch (err) { out.textContent = err.message; }
+  finally { e.target.disabled = false; e.target.textContent = "./simulate --customer-pays-mule"; }
+});
 
 // --- Daytona sandbox viewer: watch the agent work inside the container -------
 
@@ -450,9 +624,20 @@ function termLines(events) {
       case "agent.browser": push(t, `${x.browser || "chromium"} up · ${x.viewport || ""} · model ${x.model || ""}`); break;
       case "agent.started": push(t, `agent online → ${x.start ? shortUrl(x.start) : "reading the email"}`); break;
       case "agent.step": push(t, (x.observation || `step @ ${shortUrl(x.url || "")}`) + (x.click ? `  ⟶ click "${x.click}"` : "")); break;
-      case "otp.sent": push(t, `one-time code issued to inbox`); break;
+      case "otp.sent": push(t, x.actor && x.actor !== "agent" ? `⚠ one-time code requested by a THIRD PARTY (${x.ip || "?"}) — sent to the decoy's inbox` : `one-time code issued to inbox`, x.actor && x.actor !== "agent" ? "err" : ""); break;
       case "agent.otp_relayed": push(t, `OTP ${x.got ? "read from inbox, entered ✓" : "requested…"}`, x.got ? "ok" : ""); break;
-      case "session.login": push(t, `signed in as @${x.username || "victim"}`, "ok"); break;
+      case "login.password_ok": push(t, x.actor === "agent" ? `password accepted (decoy agent)` : `⚠ password accepted from OUTSIDE · ${x.ip || "?"} · ${(x.ua || "").slice(0, 40)}`, x.actor === "agent" ? "" : "err"); break;
+      case "login.failed": push(t, `wrong password tried from ${x.ip || "?"}`, "err"); break;
+      case "session.login": push(t, x.actor === "agent" ? `signed in (decoy agent · ${x.sid || ""})` : `⚠ THIRD PARTY signed in · ${x.sid || ""} · ${x.ip || "?"}`, x.actor === "agent" ? "ok" : "err"); break;
+      case "credential.used_by_third_party": push(t, `CANARY · phished credentials used by a third party (${x.stage}) — scam CONFIRMED`, "err"); break;
+      case "transfer.declined": push(t, `${x.actor === "agent" ? "agent" : "intruder"} tried ${money((x.amount_cents || 0) / 100)} → refused (limit ${money((x.limit_cents || 0) / 100)})`, "err"); break;
+      case "money.attempt": push(t, `${x.actor === "agent" ? "agent" : "intruder"} ${x.kind} ${money((x.amount_cents || 0) / 100)}${x.payee_id ? " → " + String(x.payee_id).slice(-6) : ""} · ${x.status}${x.reason ? " (" + x.reason + ")" : ""}`, x.status === "accepted" ? "" : "err"); break;
+      case "contact.changed": push(t, `${x.actor === "agent" ? "agent" : "intruder"} changed ${(x.fields || []).join(", ")}${x.changes?.email ? " → " + x.changes.email.to : ""} — lockout`, "err"); break;
+      case "watchlist.hit": push(t, `WATCHLIST · customer ${String(x.payer_id || "").slice(-6)} → ${x.role} ${String(x.payee_id || "").slice(-6)} · ${money((x.amount_cents || 0) / 100)} ${x.action} (${x.source})`, "ok"); break;
+      case "watchlist.match": push(t, `payee ${String(x.payee_id || "").slice(-6)} is a known mule from engagement ${x.engagement_id} — CONFIRMED`, "err"); break;
+      case "mule.cashout": push(t, x.error ? `cash-out from layer ${short(x.account)} failed: ${x.error}` : `layer ${short(x.account)} cashed out ${money((x.amount_cents || 0) / 100)} at an ATM (simulated)`, x.error ? "err" : "ok"); break;
+      case "mule.launder_error": push(t, `launder simulation failed: ${x.error}`, "err"); break;
+      case "mule.network": push(t, `mule ${String(x.mule || "").slice(-6)} laundered → ${(x.layers || []).length} layer accounts${x.cashout?.amount_cents ? ", " + money(x.cashout.amount_cents / 100) + " cashed out" : ""} (simulated downstream)`, "cmd"); break;
       case "email.extracted": push(t, `email read · ${(x.asks || []).length} instruction(s) to follow`); break;
       case "transfer.created": push(t, `transfer ${money((x.amount_cents || 0) / 100)} → ${String(x.payee_id || "").slice(-6)}`); break;
       case "secret.disclosed": push(t, `decoy ${x.kind} handed to ${x.host || x.channel || "?"}`, "err"); break;
@@ -462,6 +647,7 @@ function termLines(events) {
       case "scammer.drain": case "engagement.drained": push(t, `account drained · ${money((x.moved_cents || 0) / 100)} moved`, "ok"); break;
       case "agent.finished": push(t, x.summary ? `done — ${x.summary}` : `sequence complete`, "ok"); break;
       case "sandbox.finished": push(t, events.some((x) => x.type === "runtime.local") ? `agent process exited` : `daytona sandbox delete`, "cmd"); break;
+      case "detonation.resumed": push(t, `orchestrator restarted — resuming this run`, "cmd"); break;
       case "agent.error": push(t, x.error || "agent error", "err"); break;
       default: break;
     }
@@ -509,7 +695,9 @@ function switchView(v) {
   document.querySelectorAll(".vtab").forEach((b) => b.classList.toggle("on", b.dataset.view === v));
   document.getElementById("view-monitor").hidden = v !== "monitor";
   document.getElementById("view-swarm").hidden = v !== "swarm";
+  document.getElementById("view-memory").hidden = v !== "memory";
   if (v === "swarm") { loadScenarios(); attachLatestSwarm(); }
+  if (v === "memory") renderMemory();
 }
 
 async function attachLatestSwarm() {
@@ -650,3 +838,100 @@ async function openCase(c) {
         h("tr", {}, h("th", {}, "by"), h("th", {}, "why")),
         ...r.samples.map((x) => h("tr", {}, h("td", {}, x.by), h("td", {}, (x.why || []).join(", ")))))) : null);
 }
+
+
+// --- scam memory: the long-term picture across every scam ever detonated ---------------
+
+let memData = null, memSig = "", memQ = "";
+const memEl = (id) => document.getElementById(id);
+const memVisible = () => !memEl("view-memory").hidden;
+
+async function renderMemory() {
+  try {
+    memData = await api("/intel/memory");
+  } catch (e) {
+    if (!memData) memEl("mem-table").replaceChildren(h("div", { class: "mem-empty" }, `scam memory unavailable: ${e.message} (restart the orchestrator to pick up /intel/memory)`));
+    return;
+  }
+  const sig = JSON.stringify(memData.totals) + memData.scams.map((d) => `${d.id}:${d.status}:${d.moved_out_cents}:${d.fingerprint}`).join("|") + "#" + memQ;
+  if (sig === memSig) return;
+  memSig = sig;
+  renderMemStats(memData.totals);
+  renderMemPatterns(memData);
+  renderMemTable(memData);
+}
+
+function renderMemStats(t) {
+  const stat = (k, v, sub, hot) => h("div", { class: `stat ${hot ? "hot" : ""}` },
+    h("div", { class: "k" }, k), h("div", { class: "v" }, v), sub ? h("div", { class: "sub" }, sub) : null);
+  memEl("mem-stats").replaceChildren(
+    stat("scams remembered", String(t.scams), `of ${t.detonated} emails detonated · ${t.confirmed} confirmed by a third party`),
+    stat("drained from decoys", money(t.moved_out_cents / 100), "money scammers took from honeypot accounts", t.moved_out_cents > 0),
+    stat("mule accounts known", String(t.mules), t.repeat_mules ? `${t.repeat_mules} seen in more than one scam` : "watchlisted for the whole bank", t.repeat_mules > 0),
+    stat("recurring playbooks", String(t.recurring_playbooks), "same op-sequence fingerprint, different email", t.recurring_playbooks > 0),
+    stat("blocked for real customers", String(t.blocked), t.blocked ? `${money(t.blocked_cents / 100)} stopped before it settled` : "transfers to known mules declined"),
+    stat("credential leaks", String(t.credential_leaks), `${t.third_party_logins} third-party sign-in(s) with phished logins`, t.third_party_logins > 0));
+}
+
+function patternCard(title, sub, groups, opts = {}) {
+  const max = Math.max(1, ...groups.map((g) => g.count));
+  const label = opts.label || ((g) => g.value);
+  const rows = groups.slice(0, opts.limit || 8).map((g) => h("div", {
+    class: `mrow ${g.count > 1 ? "repeat" : ""} ${opts.hot && opts.hot(g) ? "hot" : ""}`,
+    title: `${g.count} scam(s) · ${money(g.moved_out_cents / 100)} moved · click to filter`,
+    onClick: () => setMemQuery(opts.query ? opts.query(g) : g.value) },
+    h("div", { class: "mv" }, h("b", {}, label(g)), h("i", {}, opts.note ? opts.note(g) : (g.moved_out_cents ? money(g.moved_out_cents / 100) : ""))),
+    h("div", { class: "sbar" }, h("i", { style: `width:${Math.round(100 * g.count / max)}%` })),
+    h("div", { class: "mn" }, `${g.count}×`)));
+  return h("div", { class: "card" }, h("h3", {}, title, h("span", {}, sub)),
+    rows.length ? rows : h("p", { class: "muted tiny" }, "nothing yet"));
+}
+
+function renderMemPatterns(m) {
+  const p = m.patterns;
+  const vec = (v) => (v || "").replace(/_/g, " ");
+  memEl("mem-patterns").replaceChildren(
+    patternCard("lure themes", "the hook the email uses", p.themes),
+    patternCard("sender domains", "where the emails come from", p.sender_domains, { note: (g) => g.vectors.map(vec).join(", ") }),
+    patternCard("phishing hosts", "where the link sends the victim", p.phish_hosts),
+    patternCard("playbook fingerprints", "op sequence once inside · L login R recon C contact S sweep X out D declined W cash",
+      p.fingerprints, { label: (g) => `${g.value} · ${g.ops || "?"}`, note: (g) => [g.profile, g.ua_family, g.structured ? "structured" : null, g.lockout ? "lockout" : null].filter(Boolean).join(" · "), hot: (g) => g.count > 1 }),
+    patternCard("mule accounts", "where the money went", p.mules,
+      { label: (g) => "…" + g.value.slice(-8), note: (g) => `${g.grade} · ${money(g.moved_out_cents / 100)}`, hot: (g) => g.count > 1, query: (g) => g.value.slice(-8) }),
+    patternCard("operator profiles + indicators", "how they behaved once inside", [...p.profiles, ...p.tags.map((g) => ({ ...g, value: vec(g.value) }))]));
+}
+
+function setMemQuery(q) {
+  memQ = (q || "").toLowerCase();
+  memEl("mem-q").value = memQ;
+  memSig = ""; if (memData) renderMemTable(memData);
+}
+
+function renderMemTable(m) {
+  const q = memQ.trim();
+  const hay = (d) => [d.subject, d.sender, d.sender_domain, d.vector, d.profile, d.fingerprint, d.phish_host, d.grade, d.status,
+    ...(d.themes || []), ...(d.tags || []), ...(d.mules || []), ...(d.secrets_leaked || [])].filter(Boolean).join(" ").toLowerCase();
+  const rows = m.scams.filter((d) => !q || hay(d).includes(q));
+  memEl("mem-table-title").textContent = q ? `scams matching “${q}”` : "all scams";
+  memEl("mem-table-sum").textContent = `${rows.length} of ${m.scams.length} · ${money(rows.reduce((n, d) => n + d.moved_out_cents, 0) / 100)} drained`;
+  if (!rows.length) return memEl("mem-table").replaceChildren(h("div", { class: "mem-empty" }, m.scams.length ? "no scam matches that filter" : "no scams remembered yet — detonate one from the inbox monitor"));
+  const repeatFp = new Set(m.patterns.fingerprints.filter((g) => g.count > 1).map((g) => g.value));
+  const repeatMule = new Set(m.patterns.mules.filter((g) => g.count > 1).map((g) => g.value));
+  const head = h("tr", {}, ...["when", "scam", "lure", "vector", "drained", "mule", "operator", "fingerprint", "verdict"].map((t) => h("th", {}, t)));
+  const body = rows.map((d) => h("tr", { class: "row", title: "open in the inbox monitor", onClick: () => { switchView("monitor"); select(d.id); } },
+    h("td", { class: "sub nw" }, fmtTime(d.at), h("br"), shortDate(d.at)),
+    h("td", {}, h("div", { style: "font-weight:600" }, d.subject || "(no subject)"), h("div", { class: "sub" }, d.sender || "—"),
+      d.phish_host ? h("div", { class: "sub" }, "→ " + d.phish_host) : null),
+    h("td", {}, h("div", { class: "pills" }, ...(d.themes || []).map((t) => h("span", { class: "pill" }, t)))),
+    h("td", {}, (d.vector || "—").replace(/_/g, " "), d.secrets_leaked?.length ? h("div", { class: "sub" }, "leaked " + d.secrets_leaked.join(", ")) : null),
+    h("td", { class: `num ${d.moved_out_cents ? "out" : ""}` }, d.moved_out_cents ? money(d.moved_out_cents / 100) : "—",
+      d.transfers_out > 1 ? h("div", { class: "sub" }, `${d.transfers_out} transfers${d.structured ? " · structured" : ""}`) : null),
+    h("td", { class: "nw" }, ...(d.mules || []).map((a) => h("div", { class: repeatMule.has(a) ? "fp repeat" : "sub" }, "…" + a.slice(-8) + (repeatMule.has(a) ? " ↺" : "")))),
+    h("td", {}, d.profile || "—", h("div", { class: "sub" }, [d.ua_family, d.lockout ? "lockout" : null, d.third_party_logins ? `${d.third_party_logins} intruder login(s)` : null].filter(Boolean).join(" · "))),
+    h("td", { class: `fp nw ${repeatFp.has(d.fingerprint) ? "repeat" : ""}` }, d.fingerprint ? `${d.fingerprint}${repeatFp.has(d.fingerprint) ? " ↺" : ""}` : "—", d.ops ? h("div", { class: "sub" }, d.ops) : null),
+    h("td", { class: "nw" }, h("span", { class: `pill ${d.grade === "confirmed" ? "danger" : ""}` }, d.grade || d.status), h("div", { class: "sub" }, `risk ${d.risk_score}`))));
+  memEl("mem-table").replaceChildren(h("table", { class: "dt" }, h("thead", {}, head), h("tbody", {}, ...body)));
+}
+
+memEl("mem-q").addEventListener("input", (e) => setMemQuery(e.target.value));
+setInterval(() => { if (memVisible()) renderMemory(); }, 5000);

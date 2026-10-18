@@ -9,6 +9,8 @@ Evidence (all from the engagement's event timeline):
   contact_changed        — the decoy's profile was edited (victim lockout)"""
 from __future__ import annotations
 
+import re
+
 from . import db
 
 
@@ -67,6 +69,66 @@ def evidence(path: str, eid: str) -> list[dict]:
     return found
 
 
+_MONEY_PATH = re.compile(r"^/accounts/[^/]+/(transfers|withdrawals)/?$")
+
+
+def submitted_unconfirmed(events: list[dict]) -> list[dict]:
+    """Money the decoy SUBMITTED through the bank site that the ledger hasn't confirmed yet. The proxy
+    reports each accepted money POST (money.attempt, and the raw request log) the instant it happens;
+    Nessie's own transfer event can trail it by a minute. Judging in that gap would call a drained
+    account safe. A submission with a tx_id is confirmed by that id; one without (the request log,
+    or an attempt Nessie answered without an id) is confirmed by count: N accepted POSTs from an
+    account need N recorded outflows from it."""
+    own = _persona_accounts(events)
+    confirmed_ids: set[str] = set()
+    confirmed_n: dict[str, int] = {}
+    for e in events:
+        d = e["data"]
+        if e["type"] in ("transfer.created", "withdrawal.created") and d.get("payer_id") in own \
+                and d.get("payee_id") not in own:
+            if d.get("tx_id"):
+                if d["tx_id"] in confirmed_ids:
+                    continue
+                confirmed_ids.add(d["tx_id"])
+            confirmed_n[d["payer_id"]] = confirmed_n.get(d["payer_id"], 0) + 1
+
+    attempts: list[dict] = []
+    logged: dict[str, int] = {}  # request-log POSTs per account (no tx_id, no amount)
+    for e in events:
+        d = e["data"]
+        if e["type"] == "money.attempt":
+            if d.get("status") == "accepted" and d.get("kind") in ("transfer", "withdrawal") \
+                    and d.get("payer_id") in own and d.get("payee_id") not in own:
+                attempts.append({"kind": d.get("kind"), "payer_id": d.get("payer_id"), "payee_id": d.get("payee_id"),
+                                 "amount_cents": d.get("amount_cents"), "tx_id": d.get("tx_id"), "via": "money.attempt"})
+        elif e["type"] == "request" and d.get("method") == "POST" and 200 <= int(d.get("status") or 0) < 300:
+            m = _MONEY_PATH.match(d.get("path") or "")
+            acct = (d.get("path") or "").split("/")[2] if m else None
+            if acct in own:
+                logged[acct] = logged.get(acct, 0) + 1
+
+    # Count-based matching per account: ids first, then whatever outflows are left cover the unnamed ones.
+    pending: list[dict] = []
+    by_payer: dict[str, list[dict]] = {}
+    for a in attempts:
+        by_payer.setdefault(a["payer_id"], []).append(a)
+    for acct in set(by_payer) | set(logged):
+        left = confirmed_n.get(acct, 0)
+        unnamed: list[dict] = []
+        for a in by_payer.get(acct, []):
+            if a["tx_id"] and a["tx_id"] in confirmed_ids:
+                left -= 1
+            else:
+                unnamed.append(a)
+        # The request log and money.attempt describe the same POSTs; take whichever saw more.
+        n_unnamed = max(len(unnamed), logged.get(acct, 0) - (len(by_payer.get(acct, [])) - len(unnamed)))
+        for i in range(max(0, n_unnamed - max(left, 0))):
+            pending.append(unnamed[i] if i < len(unnamed) else
+                           {"kind": "transfer", "payer_id": acct, "payee_id": None, "amount_cents": None,
+                            "tx_id": None, "via": "request"})
+    return pending
+
+
 def grade(found: list[dict]) -> str | None:
     """How sure we are it's a scam. `confirmed` needs the outside world to act (a third party used the
     credentials, or the mule is one we've seen before); everything else observed inside the sandbox is
@@ -91,6 +153,13 @@ def decide(path: str, eid: str) -> dict:
                 else "Following the email's instructions in the sandbox: ")
         return {"verdict": "scam", "vector": vector, "evidence": found, "grade": g,
                 "reason": lead + "; ".join(f["detail"] for f in found) + "."}
+
+    pending = submitted_unconfirmed(events)
+    if pending:
+        n = len(pending)
+        return {"verdict": "error", "vector": None, "evidence": [], "grade": None,
+                "reason": f"The sandbox victim submitted {n} transfer{'s' if n != 1 else ''} the ledger hasn't "
+                          "confirmed yet, so the run can't be called safe until Nessie records it."}
 
     finished = next((e["data"] for e in events if e["type"] == "agent.finished"), None)
     if finished is None:

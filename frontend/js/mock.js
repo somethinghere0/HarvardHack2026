@@ -95,6 +95,29 @@ export const mock = {
     return normCustomer(s.customers[current(s)]);
   },
 
+  async profile() {
+    const s = load();
+    const u = session.get()?.username;
+    return { username: u, ...(s.profiles?.[u] || { email: `${u}@example.com`, phone: "" }) };
+  },
+
+  async updateProfile({ email, phone }) {
+    const s = load();
+    const u = session.get()?.username;
+    s.profiles = s.profiles || {};
+    s.profiles[u] = { ...(s.profiles[u] || {}), ...(email != null ? { email } : {}), ...(phone != null ? { phone } : {}) };
+    save(s);
+    return { username: u, ...s.profiles[u], changed: Object.keys({ ...(email != null ? { email } : {}), ...(phone != null ? { phone } : {}) }) };
+  },
+
+  async updateCustomer({ address }) {
+    await wait();
+    const s = load();
+    s.customers[current(s)].address = address;
+    save(s);
+    return normCustomer(s.customers[current(s)]);
+  },
+
   async accounts() {
     await wait();
     const s = load();

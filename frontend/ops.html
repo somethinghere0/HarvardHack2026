@@ -107,7 +107,7 @@
 
     /* ---- inbox ---- */
     .inbox { display: grid; gap: 5px; }
-    .msg { display: grid; grid-template-columns: 70px 1fr auto auto; gap: 12px; align-items: center; color: var(--txt);
+    .msg { display: grid; grid-template-columns: 104px 1fr auto auto; gap: 12px; align-items: center; color: var(--txt);
       background: var(--panel-2); border: 1px solid var(--line-2);
       border-radius: 8px; padding: 10px 14px; text-align: left; font: inherit; width: 100%; cursor: pointer;
       transition: background .15s, box-shadow .15s, border-color .15s, transform .15s; }
@@ -116,7 +116,7 @@
     .msg.safe:hover { background: rgba(255,255,255,.06); border-color: var(--line); }
     .msg.sel { border-color: var(--grn); background: rgba(255,255,255,.06); }
     .msg.scam.sel { border-color: var(--red); background: rgba(255,77,85,.08); }
-    .msg .vtag { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+    .msg .vtag { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; align-self: start; padding-top: 2px; }
     .msg.safe .vtag { color: var(--grn); } .msg.scam .vtag { color: var(--red); }
     .msg.pending .vtag, .msg.review .vtag { color: var(--amber); }
     .msg.pending .vtag { animation: pulse 1.6s ease-in-out infinite; }
@@ -131,8 +131,9 @@
     .msg.pending .maction, .msg.review .maction { background: rgba(255,255,255,.04); color: var(--amber); }
 
     /* ---- status dots + risk + pills (used inside inbox rows) ---- */
-    .sdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--txt-faint); }
-    .sdot.active { background: var(--amber); animation: pulse 1.6s ease-in-out infinite; }
+    .sdot { display: inline-block; width: 7px; height: 7px; border: 0; padding: 0; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--txt-faint); flex: none; }
+    .sdot.active, .sdot.armed { background: var(--amber); animation: pulse 1.6s ease-in-out infinite; }
+    .sdot.confirmed { background: var(--red); }
     .sdot.drained, .sdot.compromised { background: var(--red); }
     .sdot.detonating { background: var(--amber); animation: pulse 1.6s ease-in-out infinite; }
     .sdot.cleared { background: var(--grn); }
@@ -270,7 +271,37 @@
     .sw-log .lg .er { color: var(--red); }
     .sw-log .lg .mono { color: var(--txt); }
 
-    /* ---- run story ---- */    /* ---- run story ---- */
+    /* ---- scam memory ---- */
+    .mem-search { font: inherit; font-size: 12px; width: 300px; background: var(--panel-2); color: var(--txt);
+      border: 1px solid var(--line); border-radius: 5px; padding: 7px 10px; }
+    .mem-search:focus { outline: none; border-color: var(--grn); }
+    .stats.mem-stats { grid-template-columns: repeat(6, minmax(0,1fr)); }
+    .stat .sub { font-size: 10.5px; color: var(--txt-faint); margin-top: 2px; }
+    .stat.hot .v { color: var(--red); }
+    .mem-cols { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14px; align-items: start; }
+    .mem-cols .card h3 { font-size: 12px; margin-bottom: 10px; display: flex; justify-content: space-between; }
+    .mem-cols .card h3 span { font-weight: 400; color: var(--txt-faint); font-size: 10.5px; }
+    .mrow { display: grid; grid-template-columns: minmax(0,1fr) 54px; gap: 10px; align-items: center; padding: 5px 0; font-size: 12px;
+      cursor: pointer; border-radius: 4px; }
+    .mrow:hover { background: rgba(255,255,255,.04); }
+    .mrow .mv { grid-column: 1; grid-row: 1; display: flex; justify-content: space-between; gap: 8px; min-width: 0; }
+    .mrow .mv b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+    .mrow .mv i { font-style: normal; color: var(--txt-faint); white-space: nowrap; font-size: 11px; }
+    .mrow .sbar { grid-column: 1; grid-row: 2; }
+    .mrow .mn { grid-column: 2; grid-row: 1 / 3; text-align: right; font-variant-numeric: tabular-nums; color: var(--txt-dim); }
+    .mrow.repeat .mv b { color: var(--amber); }
+    .mrow.hot .mv b { color: var(--red); }
+    .mem-table { overflow-x: auto; margin-top: 8px; }
+    .dt .pills { margin: 0; } .dt .pill { font-size: 9.5px; padding: 2px 6px; }
+    .dt .sub { color: var(--txt-dim); font-size: 11px; }
+    .dt td.nw, .dt td.nw .sub { white-space: nowrap; }
+    .dt .fp { color: var(--grn-dim); } .dt .fp.repeat { color: var(--amber); }
+    .mem-empty { color: var(--txt-dim); padding: 40px 20px; text-align: center; }
+    .mem-empty::before { content: "> "; color: var(--grn); }
+    @media (max-width: 1100px) { .mem-cols { grid-template-columns: 1fr 1fr; } .stats.mem-stats { grid-template-columns: repeat(3, minmax(0,1fr)); } }
+    @media (max-width: 720px) { .mem-cols { grid-template-columns: 1fr; } .stats.mem-stats { grid-template-columns: 1fr 1fr; } .mem-search { width: 100%; } }
+
+    /* ---- run story ---- */
     .story { border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); overflow: hidden; }
     .story-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
     .stage { font: inherit; color: var(--txt-faint); text-align: left; cursor: pointer; background: transparent; border: 0;
@@ -335,8 +366,51 @@
     .frames button:hover { opacity: 1; transform: translateY(-2px); }
     .frames button.on { opacity: 1; border-color: var(--grn); }
     .frames img { width: 72px; height: 48px; object-fit: cover; object-position: top; display: block; border-radius: 3px; }
-    @media (max-width: 1100px) { .d-grid { grid-template-columns: 1fr 1fr; } .stats { grid-template-columns: 1fr 1fr; } }
-    @media (max-width: 820px) { .msg { grid-template-columns: 60px 1fr auto; } .msg .maction { display: none; } .d-grid { grid-template-columns: 1fr; } .sb-body { height: auto; } }
+    /* ---- armed / playbook / flow / watchlist ---- */
+    .vtag.confirmed { color: #fff; background: var(--red-dim); }
+    div.armed { border: 1px solid rgba(245,196,81,.35); background: rgba(245,196,81,.05); border-radius: 10px; padding: 14px 16px; }
+    div.armed.confirmed { border-color: rgba(255,90,95,.45); background: rgba(255,90,95,.06); }
+    .armed-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    .armed-head b { color: var(--amber); font-size: 12px; letter-spacing: .04em; }
+    .armed.confirmed .armed-head b { color: var(--red); }
+    .armed-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 0 rgba(245,196,81,.6); animation: ping 1.4s ease-out infinite; }
+    .armed.confirmed .armed-dot { background: var(--red); box-shadow: 0 0 0 0 rgba(255,90,95,.6); }
+    @keyframes ping { 70% { box-shadow: 0 0 0 10px rgba(245,196,81,0); } 100% { box-shadow: 0 0 0 0 rgba(245,196,81,0); } }
+    .armed-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .armed .kv dd { word-break: break-all; }
+    .pb .pb-stages { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 8px; margin-bottom: 12px; }
+    .pb-stage { border: 1px solid var(--line-2); border-radius: 8px; padding: 10px 11px; background: var(--panel-2); font-size: 11.5px; color: var(--txt-dim); }
+    .pb-stage.done { border-color: rgba(61,220,132,.35); color: var(--txt); }
+    .pb-title { font-weight: 700; display: flex; gap: 6px; align-items: baseline; margin-bottom: 6px; color: var(--txt); }
+    .pb-stage.done .pb-n { color: var(--grn); } .pb-n { color: var(--txt-faint); }
+    .pb-line { margin: 3px 0; line-height: 1.4; }
+    .pb-stats { grid-template-columns: repeat(6, minmax(0,1fr)); }
+    .pb-stats .stat .v { font-size: 15px; }
+    .pb-related { margin-top: 10px; font-size: 12px; color: var(--amber); }
+    .pb-related a { color: var(--grn); }
+    .flow { width: 100%; height: auto; display: block; }
+    .flow .fe { fill: none; stroke: var(--txt-faint); stroke-width: 1.5; }
+    .flow .fe.external, .flow .fe.agent { stroke: var(--grn-dim); }
+    .flow .fe.declined { stroke: var(--red); stroke-dasharray: 4 3; }
+    .flow .fl { fill: var(--txt-dim); font-size: 10px; text-anchor: middle; font-family: var(--mono); }
+    .flow .fn { fill: var(--panel-2); stroke-width: 1.5; }
+    .flow .fn.wl { fill: rgba(255,90,95,.12); }
+    .flow .fnt { fill: var(--txt); font-size: 11px; font-weight: 700; text-anchor: middle; font-family: var(--mono); }
+    .flow .fns { fill: var(--txt-dim); font-size: 9.5px; text-anchor: middle; font-family: var(--mono); }
+    .wl .wl-cols { display: grid; grid-template-columns: 1fr 1.4fr; gap: 18px; margin-top: 10px; }
+    .wl .dt { table-layout: fixed; width: 100%; }
+    .wl .dt td, .wl .dt th { padding: 5px 8px; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
+    .wl .dt th:nth-child(1), .wl .dt td:nth-child(1) { width: 58px; }
+    .wl .dt th:nth-child(2), .wl .dt td:nth-child(2) { width: 118px; }
+    .wl .dt th:nth-child(3), .wl .dt td:nth-child(3) { width: 82px; }
+    .wl .dt th:nth-child(4), .wl .dt td:nth-child(4) { width: 90px; }
+    .wl .dt td:last-child { white-space: normal; word-break: break-word; }
+    .wl .dt .pill { white-space: nowrap; display: inline-block; }
+    .wl .hit td { background: rgba(255,90,95,.05); }
+    .wl-result { min-height: 16px; margin-top: 8px; }
+    .wl-result .ok { color: var(--grn); font-weight: 700; } .wl-result .er { color: var(--amber); font-weight: 700; }
+    @media (max-width: 1100px) { .d-grid { grid-template-columns: 1fr 1fr; } .stats { grid-template-columns: 1fr 1fr; } .pb .pb-stages { grid-template-columns: repeat(2, minmax(0,1fr)); } .pb-stats { grid-template-columns: repeat(3, minmax(0,1fr)); } .armed-grid, .wl .wl-cols { grid-template-columns: 1fr; } }
+    @media (max-width: 820px) { .msg { grid-template-columns: 96px 1fr auto; } .msg .maction { display: none; } .d-grid { grid-template-columns: 1fr; } .sb-body { height: auto; } }
 
   </style>
 </head>
@@ -346,6 +420,7 @@
     <nav class="views">
       <button class="vtab on" data-view="monitor">inbox monitor</button>
       <button class="vtab" data-view="swarm">scenario swarm</button>
+      <button class="vtab" data-view="memory">scam memory</button>
     </nav>
     <div class="topbar-right"><span class="badge" id="count">0 engagements</span></div>
   </header>
@@ -366,6 +441,17 @@
     </section>
     <div id="verdict"></div>
     <section class="card detail" id="panel" hidden></section>
+    <section class="card wl" id="watchlist">
+      <div class="eng-row">
+        <div>
+          <h3 style="font-size:13px">// bank-wide · mule watchlist</h3>
+          <p class="tiny muted" style="margin:4px 0 0">Every account a scam sent money to screens the whole bank: Nessie asks before any transfer settles, and a transfer from an ordinary customer to a known mule is stopped and attributed to the engagement that found it. <span id="wl-mode"></span></p>
+        </div>
+        <div class="controls"><button class="btn btn-light" id="sim-pay">./simulate --customer-pays-mule</button></div>
+      </div>
+      <div class="wl-result tiny" id="wl-result"></div>
+      <div id="wl-body"></div>
+    </section>
   </main>
   <main class="ops" id="view-swarm" hidden>
     <div class="swarm-head">
@@ -389,6 +475,20 @@
       <div class="card"><h3 style="font-size:13px;margin-bottom:10px">Nessie API, live</h3><div class="sw-log" id="sw-log"></div></div>
     </div>
     <div class="card" id="sw-caseview" hidden></div>
+  </main>
+  <main class="ops" id="view-memory" hidden>
+    <div class="swarm-head">
+      <div>
+        <h2 class="swarm-title">scam memory</h2>
+        <p class="muted tiny">Every scam the honeypot has ever detonated, remembered: who sent it, what it asked for, where the link went, how the money moved and who received it — and the lures, domains, mule accounts and playbooks that keep coming back.</p>
+      </div>
+      <div class="controls">
+        <input class="mem-search" id="mem-q" type="search" placeholder="filter: subject, sender, theme, mule…" autocomplete="off">
+      </div>
+    </div>
+    <div class="stats mem-stats" id="mem-stats"></div>
+    <div class="mem-cols" id="mem-patterns"></div>
+    <div class="card"><div class="group-head"><h3 id="mem-table-title">all scams</h3><span class="group-sum" id="mem-table-sum"></span></div><div class="mem-table" id="mem-table"></div></div>
   </main>
   <script type="module" src="js/ops.js"></script>
 </body>

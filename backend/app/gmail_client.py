@@ -137,6 +137,26 @@ class Gmail:
             M.select(folder)
             M.uid("copy", uid, f'"{label}"')
 
+    def remove_label(self, gmail_id: str, label: str) -> bool:
+        """Take a label off a message, found in that label's folder by its stable Gmail id (UIDs are
+        per-folder, so the inbox UID can't be used here). The message stays everywhere else it is."""
+        if not label or not gmail_id or gmail_id.startswith("uid:"):
+            return False
+        with self._imap() as M:
+            typ, _ = M.select(f'"{label}"')
+            if typ != "OK":
+                return False
+            typ, data = M.uid("search", None, "X-GM-MSGID", gmail_id)
+            if typ != "OK" or not data or not data[0].split():
+                return False
+            for uid in data[0].split():
+                M.uid("store", uid, "+FLAGS", "(\\Deleted)")
+            try:
+                M.uid("expunge", b",".join(data[0].split()))
+            except Exception:
+                M.expunge()
+        return True
+
     def archive(self, uid: str, folder: str = "INBOX") -> None:
         """Remove a message from a folder/label (archive). On Gmail this just drops that label — the
         message stays in All Mail; it is NOT trashed. Used only when gmail_archive_scams is on."""

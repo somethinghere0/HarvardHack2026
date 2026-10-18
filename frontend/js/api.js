@@ -166,6 +166,20 @@ export const live = {
     return normTxn(unwrap(r) || {}, "transfer");
   },
 
+  // Contact details the bank holds (the proxy's own record: where one-time codes are sent).
+  async profile() {
+    return request("GET", "/auth/profile");
+  },
+
+  async updateProfile({ email, phone }) {
+    return request("PATCH", "/auth/profile", { email, phone });
+  },
+
+  // Mailing address lives on the Nessie customer record.
+  async updateCustomer({ address }) {
+    return normCustomer(unwrap(await request("PATCH", `/customers/${customerId()}`, { address })));
+  },
+
   async deposit({ accountId, amount, description }) {
     const r = await request("POST", `/accounts/${encodeURIComponent(accountId)}/deposits`, {
       medium: "balance", amount_cents: toCents(amount), description,
