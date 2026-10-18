@@ -36,7 +36,11 @@ function shell(username, active, ...content) {
     h("footer", { class: "foot" }, "Bank of USA · Equal Housing Lender · Member FDIC (simulation). Not a real bank; no real money moves.")];
 }
 
-// --- auth -----------------------------------------------------------------
+// --- public bank homepage (sign-in) --------------------------------------
+
+const SITE_NAV = ["Checking", "Savings & CDs", "Credit cards", "Home loans", "Auto", "Investing"];
+const SITE_UTIL = ["Locations", "Help", "Contact us", "Español"];
+const fakeLink = (e) => e.preventDefault();
 
 function modeToggle() {
   const flip = (m) => () => { setMode(m); session.clear(); go("login"); };
@@ -46,35 +50,57 @@ function modeToggle() {
       h("button", { class: `chip ${getMode() === "demo" ? "chip-on" : ""}`, onClick: flip("demo") }, "Demo")));
 }
 
-function authAside() {
-  const point = (text) => h("div", { class: "auth-point" }, h("span", { class: "tick" }, "✓"), text);
-  return h("aside", { class: "auth-aside" },
-    h("div", { class: "brand" }, h("span", { class: "brand-mark lg" }, "US"), h("span", {}, "Bank of USA")),
-    h("h1", {}, "Banking built for all of us."),
-    h("p", { class: "lede" },
-      "Checking, savings, and credit cards in one place — with online and mobile banking, 24/7."),
-    h("div", { class: "auth-points" },
-      point("Checking, savings & credit in one place"),
-      point("Move money in seconds"),
-      point("Security & fraud monitoring, around the clock")));
+function siteHeader() {
+  return h("div", { class: "site-head" },
+    h("div", { class: "util-bar" }, h("div", { class: "util-wrap" },
+      ...SITE_UTIL.map((l) => h("a", { href: "#", class: "util-link", onClick: fakeLink }, l)))),
+    h("div", { class: "mast" }, h("div", { class: "mast-wrap" },
+      h("div", { class: "brand site-brand", onClick: () => go("login") },
+        h("span", { class: "brand-mark" }, "US"), h("span", {}, "Bank of USA")),
+      h("nav", { class: "site-nav" },
+        ...SITE_NAV.map((l) => h("a", { href: "#", class: "site-nav-link", onClick: fakeLink }, l))),
+      h("div", { class: "mast-right" },
+        h("span", { class: `badge badge-${getMode()}` }, getMode() === "demo" ? "Demo" : "Live")))));
 }
 
+function siteFooter() {
+  const col = (title, items) => h("div", { class: "foot-col" }, h("h4", {}, title),
+    ...items.map((i) => h("a", { href: "#", onClick: fakeLink }, i)));
+  return h("footer", { class: "site-foot" },
+    h("div", { class: "foot-cols" },
+      col("Banking", ["Checking", "Savings & CDs", "Overdraft protection"]),
+      col("Credit cards", ["Cash rewards", "Travel rewards", "Student cards"]),
+      col("Loans", ["Home loans", "Auto loans", "Refinance"]),
+      col("Investing", ["Brokerage", "Retirement", "Guided advice"]),
+      col("Bank of USA", ["About us", "Careers", "Security", "Privacy"])),
+    h("p", { class: "foot-legal" },
+      "Bank of USA · Equal Housing Lender · Member FDIC (simulation). Not a real bank; no real money moves."));
+}
+
+const siteChrome = (...content) => [siteHeader(), ...content, siteFooter()];
+
+// Secondary auth pages (enroll, verification): a centered card on the site chrome.
 function authShell(title, subtitle, form, footer) {
-  return [topbar(null),
-    h("div", { class: "auth-page" }, authAside(),
-      h("div", { class: "auth-main" },
-        h("div", { class: "card auth-card" },
-          h("h2", {}, title), subtitle && h("p", { class: "muted" }, subtitle), form, footer,
-          modeToggle(),
-          getMode() === "demo" && h("p", { class: "muted tiny center mode-note" },
-            "Demo mode runs entirely in this browser — no server needed. Sign up to begin."))))];
+  return siteChrome(h("main", { class: "auth-main" },
+    h("div", { class: "card auth-card" },
+      h("h2", {}, title), subtitle && h("p", { class: "muted" }, subtitle), form, footer, modeToggle(),
+      getMode() === "demo" && h("p", { class: "muted tiny center mode-note" },
+        "Demo mode runs entirely in this browser — no server needed."))));
+}
+
+function tile(accent, title, body) {
+  return h("div", { class: "tile" },
+    h("div", { class: "tile-bar", style: `background:${accent}` }),
+    h("h3", {}, title), h("p", {}, body),
+    h("a", { href: "#", class: "tile-link", onClick: fakeLink }, "Learn more →"));
 }
 
 function loginView() {
   const err = h("div");
-  const form = h("form", { onSubmit: onSubmit },
+  const form = h("form", { class: "signin-form", onSubmit: onSubmit },
     field("Username", h("input", { name: "username", autocomplete: "username", required: true, autofocus: true })),
     field("Password", h("input", { name: "password", type: "password", autocomplete: "current-password", required: true })),
+    h("label", { class: "remember" }, h("input", { type: "checkbox" }), "Remember my username"),
     err,
     h("button", { class: "btn btn-primary btn-block", type: "submit" }, "Sign in"));
 
@@ -88,8 +114,27 @@ function loginView() {
     });
   }
 
-  render(...authShell("Welcome back", "Sign in to your accounts", form,
-    h("p", { class: "auth-alt" }, "New here? ", h("a", { href: "#", onClick: nav("signup") }, "Create an account"))));
+  const signin = h("div", { class: "signin-card" },
+    h("h2", {}, "Sign in to Online Banking"), form,
+    h("div", { class: "signin-links" },
+      h("a", { href: "#", onClick: fakeLink }, "Forgot ID/Password?"),
+      h("a", { href: "#", onClick: nav("signup") }, "Enroll now")),
+    modeToggle());
+
+  const hero = h("section", { class: "home-hero" }, h("div", { class: "hero-wrap" },
+    h("div", { class: "hero-copy" },
+      h("h1", {}, "Banking built around you."),
+      h("p", {}, "Checking, savings, credit cards, and loans — all in one place, on web and mobile."),
+      h("button", { class: "btn btn-light hero-cta", onClick: () => go("signup") }, "Open an account")),
+    signin));
+
+  const tiles = h("section", { class: "tiles" }, h("div", { class: "tiles-wrap" },
+    tile("#e31837", "Everyday Checking", "No-monthly-fee options with overdraft protection built in."),
+    tile("#012169", "High-Yield Savings", "Grow your balance with competitive rates and autosave."),
+    tile("#e31837", "Cash Rewards Card", "Earn rewards on everyday spending, no annual fee."),
+    tile("#012169", "Home Loans", "Buy or refinance with rates and tools to guide you.")));
+
+  render(...siteChrome(hero, tiles));
 }
 
 function otpView(ctx) {
