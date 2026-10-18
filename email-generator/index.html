@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Decoy</title>
+<meta name="description" content="An email firewall that doesn't classify scams. It proves them. Every inbound email is detonated against a disposable decoy victim on a real but fake bank account; the verdict comes from what complying actually cost.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b0f19;
+    --panel: #121829;
+    --text: #e6e9f2;
+    --muted: #8b95b0;
+    --accent: #5b8cff;
+    --ok: #3ddc97;
+    --bad: #ff5d73;
+    --warn: #ffc857;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 0 1.25rem; }
+  nav { display: flex; justify-content: space-between; align-items: center; padding: 1.5rem 0; }
+  nav .logo { font-weight: 600; }
+  nav a { color: var(--muted); text-decoration: none; margin-left: 1.5rem; font-size: .9rem; }
+  nav a:hover { color: var(--text); }
+
+  .hero { padding: 5rem 0 4rem; }
+  .badge { font: 400 .8rem "JetBrains Mono", monospace; color: var(--accent); }
+  h1 { font-size: clamp(2.2rem, 6vw, 3.6rem); line-height: 1.1; letter-spacing: -.03em; font-weight: 600; margin: 1rem 0 1.2rem; }
+  .btn {
+    display: inline-block; padding: .75rem 1.4rem; font-weight: 500; text-decoration: none;
+    color: #fff; background: var(--accent); border: 0; border-radius: 4px; cursor: pointer;
+    font-size: 1rem; font-family: inherit;
+  }
+  .btn:hover { opacity: .85; }
+  .btn.ghost { background: none; color: var(--muted); padding-left: 1rem; }
+  .btn.ghost:hover { color: var(--text); opacity: 1; }
+
+  section { padding: 3rem 0; }
+  h2 { font-size: 1.6rem; letter-spacing: -.02em; font-weight: 600; margin: 0 0 .5rem; }
+  .sub { color: var(--muted); margin: 0 0 2rem; }
+
+  .flow { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; font: 400 .85rem "JetBrains Mono", monospace; }
+  .flow .node { padding: .5rem .9rem; background: var(--panel); border-radius: 4px; }
+  .flow .arrow { color: var(--muted); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+  .card { background: var(--panel); border-radius: 4px; padding: 1.4rem; }
+  .card .num { font: 400 .8rem "JetBrains Mono", monospace; color: var(--accent); }
+  .card h3 { margin: .4rem 0; font-size: 1.05rem; font-weight: 600; }
+  .card p { margin: 0; color: var(--muted); font-size: .95rem; }
+
+  .tag { font: 500 .75rem "JetBrains Mono", monospace; text-transform: uppercase; }
+  .released .tag { color: var(--ok); } .blocked .tag { color: var(--bad); } .held .tag { color: var(--warn); }
+
+  .stack { color: var(--muted); font: 400 .85rem "JetBrains Mono", monospace; }
+  .stack span + span::before { content: " / "; }
+
+  
+
+  footer { padding: 2.5rem 0 3rem; color: var(--muted); font-size: .85rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <div class="logo">Decoy</div>
+    <div><a href="#how">How it works</a><a href="#verdicts">Verdicts</a><a href="#safety">Safety</a><a href="#try">Try it</a></div>
+  </nav>
+
+  <header class="hero">
+    <span class="badge">HarvardHack 2026</span>
+    <h1>An email firewall that doesn't classify scams. It proves them.</h1>
+    <p class="lead">Every inbound email is held and detonated. A disposable decoy victim does exactly what the email says — opens the link, signs in, moves the money — inside a throwaway sandbox, on a real but fake bank account. If complying costs the decoy money or secrets, it's a scam and it's quarantined. If nothing is lost, it's delivered. The verdict comes from what happened, not from how the email reads.</p>
+    <a class="btn" href="#try">Try the demo</a>
+    <a class="btn ghost" href="#how">How it works</a>
+  </header>
+
+  <section id="how">
+    <h2>How it works</h2>
+    <p class="sub">Every message takes the same path. We don't guess from the wording — we let a decoy comply and watch what it costs.</p>
+    <div class="flow">
+      <div class="node">Gmail</div><div class="arrow">→</div>
+      <div class="node">Hold + brief</div><div class="arrow">→</div>
+      <div class="node">Decoy victim</div><div class="arrow">→</div>
+      <div class="node">Daytona sandbox agent</div><div class="arrow">→</div>
+      <div class="node">Verdict</div><div class="arrow">→</div>
+      <div class="node">Armed decoy</div>
+    </div>
+    <div class="grid" style="margin-top:1.5rem">
+      <div class="card"><div class="num">01</div><h3>Hold &amp; brief</h3><p>Every email is held out of the inbox. Claude extracts what it asks the reader to do — links to open, places to sign in, money to send, codes to hand over. That briefs the victim; it is not the verdict.</p></div>
+      <div class="card"><div class="num">02</div><h3>Build a decoy</h3><p>A Claude-invented identity with a real login and a funded Capital One Nessie customer — checking, savings and a card, seeded with history so it doesn't look brand new.</p></div>
+      <div class="card"><div class="num">03</div><h3>Detonate</h3><p>In a disposable Daytona sandbox, a Playwright + Claude agent plays the recipient and does exactly what the email says, reading any one-time code out of the decoy's own inbox. You watch it live.</p></div>
+      <div class="card"><div class="num">04</div><h3>Judge by outcome</h3><p>Money left the decoy, or its credentials landed outside the bank: scam, quarantined. Full compliance and nothing lost: safe, delivered.</p></div>
+      <div class="card"><div class="num">05</div><h3>Stay armed</h3><p>The phished login keeps working. A canary flags any sign-in that isn't ours, upgrading the verdict from likely to confirmed and recording the account-takeover playbook.</p></div>
+      <div class="card"><div class="num">06</div><h3>Fight back bank-wide</h3><p>Every mule account a scam drained to goes on a watchlist. Nessie's decision hook then declines any customer's transfer to that mule before the money settles.</p></div>
+    </div>
+  </section>
+
+  <section id="verdicts" class="verdicts">
+    <h2>Three possible verdicts</h2>
+    <p class="sub">Each message ends up in exactly one place, decided by what complying cost.</p>
+    <div class="grid">
+      <div class="card released"><div class="tag">Delivered</div><h3>Safe</h3><p>The decoy complied fully and lost nothing — no money moved, no secrets left the bank. Delivered to your inbox.</p></div>
+      <div class="card blocked"><div class="tag">Quarantined</div><h3>Scam</h3><p>Complying cost the decoy money or leaked its credentials outside the bank. Quarantined — and the mule it paid goes on a bank-wide watchlist.</p></div>
+      <div class="card held"><div class="tag">Held</div><h3>Review</h3><p>The run couldn't finish — the page was down or the sandbox failed. It stays out of your inbox until you review it.</p></div>
+    </div>
+  </section>
+
+  <section id="safety">
+    <h2>Safety model</h2>
+    <p class="sub">No real money moves and no real person is ever involved.</p>
+    <div class="grid">
+      <div class="card"><h3>Disposable</h3><p>Each engagement opens a fresh Daytona sandbox that is auto-deleted and never reused. Downloads are cancelled, dialogs dismissed and popups closed.</p></div>
+      <div class="card"><h3>Decoy data only</h3><p>Every victim is a Claude-invented identity on a Capital One Nessie sandbox account. The money is mock, the bank is original branding, and each session is scoped to its own decoy.</p></div>
+      <div class="card"><h3>Built as an instrument</h3><p>A $5,000 per-transfer limit, savings held above checking, and every bank operation tagged to a session and actor — the attribution that powers the canary and the playbook.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="stack"><span>Capital One Nessie v2</span><span>Claude</span><span>Daytona</span><span>Playwright</span><span>FastAPI</span><span>Gmail IMAP + SMTP</span><span>ngrok</span></div>
+  </section>
+
+  <section id="try">
+    <h2>Try it</h2>
+    <p class="sub">This opens your email app with the scam already written — a "move your balance somewhere safe" lure pointing at the real Bank of USA. Send it to the protected inbox and watch the Scam Tracker detonate it.</p>
+    <div class="composer">
+      <a class="btn" id="compose" href="#try">Open in email app</a>
+    </div>
+  </section>
+
+  <footer>Built at HarvardHack 2026 · Nessie · Claude · Daytona · Gmail · ngrok</footer>
+</div>
+
+<script>
+  // Minimal CSV parser: handles quoted fields, commas and newlines inside quotes, "" escapes.
+  function parseCsv(text) {
+    const rows = [];
+    let row = [], field = "", quoted = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (quoted) {
+        if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+        else if (c === '"') quoted = false;
+        else field += c;
+      } else if (c === '"') quoted = true;
+      else if (c === ",") { row.push(field); field = ""; }
+      else if (c === "\n" || c === "\r") {
+        if (c === "\r" && text[i + 1] === "\n") i++;
+        row.push(field); field = "";
+        rows.push(row); row = [];
+      } else field += c;
+    }
+    if (field || row.length) { row.push(field); rows.push(row); }
+    return rows;
+  }
+
+  async function load() {
+    // Edit email.csv to change the email. The first data row is used.
+    const res = await fetch("email.csv");
+    const [header, first] = parseCsv(await res.text());
+    const EMAIL = Object.fromEntries(header.map((h, i) => [h.trim(), first[i] || ""]));
+
+    const params = new URLSearchParams();
+    if (EMAIL.cc) params.set("cc", EMAIL.cc);
+    params.set("subject", EMAIL.subject);
+    params.set("body", EMAIL.body);
+    // URLSearchParams encodes spaces as "+", which mail clients show literally.
+    const query = params.toString().replace(/\+/g, "%20");
+
+    document.getElementById("compose").href = `mailto:${encodeURIComponent(EMAIL.to)}?${query}`;
+  }
+
+  load().catch(() => {
+    document.getElementById("compose").textContent = "Could not load email.csv";
+  });
+</script>
+</body>
+</html>
