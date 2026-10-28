@@ -76,7 +76,7 @@
     <span class="badge">HarvardHack 2026</span>
     <h1>Scam emails never reach your inbox.</h1>
     <p class="lead">Incoming mail is held in quarantine until it is verified. Suspicious links are opened in a disposable sandbox and fed a decoy identity, so we catch the scam before you ever see it.</p>
-    <a class="btn" href="#try">Try the demo</a>
+    <a class="btn" href="#try">Try it</a>
     <a class="btn ghost" href="#how">How it works</a>
   </header>
 
@@ -124,57 +124,14 @@
 
   <section id="try">
     <h2>Try it</h2>
-    <p class="sub">This opens your email app with a message already written. Send it to a gateway-protected address to see it get caught.</p>
+    <p class="sub">The full project is open source. Clone the repo and follow the README to run the gateway yourself.</p>
     <div class="composer">
-      <a class="btn" id="compose" href="#try">Open in email app</a>
+      <a class="btn" href="https://github.com/somethinghere0/HarvardHack2026" target="_blank" rel="noopener noreferrer">View the repo on GitHub</a>
     </div>
   </section>
 
   <footer>Built at HarvardHack 2026 · Gmail · Daytona · Nessie</footer>
 </div>
 
-<script>
-  // Minimal CSV parser: handles quoted fields, commas and newlines inside quotes, "" escapes.
-  function parseCsv(text) {
-    const rows = [];
-    let row = [], field = "", quoted = false;
-    for (let i = 0; i < text.length; i++) {
-      const c = text[i];
-      if (quoted) {
-        if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
-        else if (c === '"') quoted = false;
-        else field += c;
-      } else if (c === '"') quoted = true;
-      else if (c === ",") { row.push(field); field = ""; }
-      else if (c === "\n" || c === "\r") {
-        if (c === "\r" && text[i + 1] === "\n") i++;
-        row.push(field); field = "";
-        rows.push(row); row = [];
-      } else field += c;
-    }
-    if (field || row.length) { row.push(field); rows.push(row); }
-    return rows;
-  }
-
-  async function load() {
-    // Edit email.csv to change the email. The first data row is used.
-    const res = await fetch("email.csv");
-    const [header, first] = parseCsv(await res.text());
-    const EMAIL = Object.fromEntries(header.map((h, i) => [h.trim(), first[i] || ""]));
-
-    const params = new URLSearchParams();
-    if (EMAIL.cc) params.set("cc", EMAIL.cc);
-    params.set("subject", EMAIL.subject);
-    params.set("body", EMAIL.body);
-    // URLSearchParams encodes spaces as "+", which mail clients show literally.
-    const query = params.toString().replace(/\+/g, "%20");
-
-    document.getElementById("compose").href = `mailto:${encodeURIComponent(EMAIL.to)}?${query}`;
-  }
-
-  load().catch(() => {
-    document.getElementById("compose").textContent = "Could not load email.csv";
-  });
-</script>
 </body>
 </html>
