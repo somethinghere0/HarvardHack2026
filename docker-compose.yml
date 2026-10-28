@@ -1,46 +1,50 @@
-x-hardening: &hardening
-  security_opt: ["no-new-privileges:true"]
-  cap_drop: [ALL]
-  restart: unless-stopped
-
 services:
   proxy:
-    <<: *hardening
     build: ./proxy
-    env_file: ./proxy/.env
-    read_only: true
-    tmpfs: [/tmp]
+    env_file: ./.env
+    environment:
+      DB_PATH: /data/proxy.db
+      ORCHESTRATOR_URL: http://backend:8001
+      OTP_REQUIRED: "1"
+      ENFORCE_CUSTOMER_SCOPE: "1"
     volumes:
       - proxy-data:/data
-    # No published port: only the backend can reach the Nessie key holder.
+    restart: unless-stopped
 
   backend:
-    <<: *hardening
     build: ./backend
-    env_file:
-      - path: ./backend/.env
-        required: false
+    env_file: ./.env
     environment:
+      ORCH_DB_PATH: /data/orchestrator.db
       PROXY_URL: http://proxy:8000
-    read_only: true
-    tmpfs: [/tmp]
     volumes:
-      - backend-data:/data
+      - orch-data:/data
     depends_on:
       proxy:
         condition: service_healthy
     ports:
-      - "127.0.0.1:8001:8001"
+      - "8001:8001"
+    restart: unless-stopped
 
   frontend:
     build: ./frontend
-    security_opt: ["no-new-privileges:true"]
-    restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+      proxy:
+        condition: service_healthy
     ports:
-      - "127.0.0.1:3000:80"
+      - "3000:80"
+    restart: unless-stopped
+
+  # Public URL for Nessie webhooks, the scammer-facing bank, and the sandboxed agent. Set
+  # CLOUDFLARE_TUNNEL_TOKEN in .env and PUBLIC_URL to the tunnel hostname, then uncomment.
+  # tunnel:
+  #   image: cloudflare/cloudflared:latest
+  #   command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+  #   depends_on: [frontend]
+  #   restart: unless-stopped
 
 volumes:
   proxy-data:
-  backend-data:
+  orch-data:

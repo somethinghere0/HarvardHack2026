@@ -3,3 +3,15 @@ node_modules/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# dev
+.devdata/
+secrets/
+.venv/
+venv/
+.DS_Store
+.env.local
+.env.*
+!.env.example
+.venv/
+scratchpad/

@@ -1,4 +1,11 @@
+# Core
 fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
 httpx>=0.27,<1
-daytona>=0.225,<1
+
+# Live integrations (imported lazily; required for the features that use them)
+anthropic>=0.40,<1
+daytona>=0.100,<1
+google-api-python-client>=2.140,<3
+google-auth>=2.34,<3
+google-auth-oauthlib>=1.2,<2

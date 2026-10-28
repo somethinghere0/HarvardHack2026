@@ -1,10 +1,11 @@
 to,cc,subject,body
-recipient@example.com,,Urgent action required,"Dear Mr. Ty,
+recipient@example.com,,Bank of USA: unusual activity — secure your balance now,"Dear Bank of USA customer,
 
-We're having some trouble with your current account information. We have attached
-a link before to check and verify your information.
+We detected unusual activity on your account. For your protection, please sign in and move your balance to your protected holding account while our team reviews the activity.
 
-{link}
+Sign in here: https://nutshell-smartness-protegee.ngrok-free.dev
 
-Best regards,
-Scammer"
+For your security, please complete this within 24 hours. Accounts that are not secured may be temporarily suspended.
+
+Thank you,
+Bank of USA — Account Security Team"
